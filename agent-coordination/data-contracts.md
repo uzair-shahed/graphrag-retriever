@@ -61,6 +61,7 @@ application chunk minus gold labels in the model payload
 Contract 3
 mentions/triples plus candidate entities
   -> resolution decisions
+  -> Entity Resolution Agent invokes validated `write_graph`
   -> deterministic graph_write projection
 
 Contract 4
@@ -430,7 +431,7 @@ Example dead-letter entry:
 
 ### Purpose
 
-Define how extracted mentions and complete triples are passed to entity resolution before graph writes. Resolution maps mentions to existing canonical entities conservatively; it does not write directly to Neo4j.
+Define how extracted mentions and complete triples are passed to entity resolution before graph writes. Resolution maps mentions to existing canonical entities conservatively. The Entity Resolution Agent may invoke the constrained `write_graph` tool, but the tool accepts only validated structured resolution decisions and delegates to deterministic graph-write logic; the agent cannot submit raw Cypher or bypass validation.
 
 The current decisions are:
 
@@ -442,6 +443,9 @@ The current decisions are:
 - The resolution agent returns `match`, `non_match`, `uncertain`, or `abstain`.
 - Only `match` may produce a canonical entity link. `uncertain` and `abstain` preserve an unresolved mention and do not merge it.
 - Conflicting properties are retained as separate values with their source chunks and confidence; the resolver must not silently overwrite prior evidence.
+- The Entity Resolution Agent may call `write_graph` after producing structured resolution decisions.
+- `write_graph` validates those decisions, produces the Contract 4 `graph_write` projection, and invokes the Neo4j writer transactionally.
+- Raw Cypher, arbitrary tool arguments, and direct Neo4j access are rejected.
 
 ### Input shape
 
@@ -637,6 +641,8 @@ The candidate list contains at most the configured top-K candidates, initially r
 
 The `decisions` list is the auditable resolver result. The `graph_write` projection is produced by deterministic application code from `match` decisions and is the payload passed to Contract 4. `non_match`, `uncertain`, and `abstain` decisions are retained for audit but do not contribute canonical entities or relationships to `graph_write`.
 
+When the Entity Resolution Agent invokes `write_graph`, the tool performs this projection and handoff internally. The agent receives the structured write result, including committed IDs, conflicts, and errors; it never receives permission to submit Cypher directly.
+
 ### Candidate decision semantics
 
 - `match`: one candidate is sufficiently supported; link the mention to that canonical ID.
@@ -702,7 +708,7 @@ Conflict resolution is deferred to the graph-write policy in Contract 4. The ent
 
 ### Purpose
 
-Define the validated graph operations that may reach Neo4j. The LLM and entity-resolution agent do not write raw output directly to the database; a deterministic writer validates the resolution result, constructs parameterized Cypher, and executes one transaction.
+Define the validated graph operations that may reach Neo4j. The Entity Resolution Agent may invoke `write_graph`, but the tool accepts only validated structured resolution decisions. `write_graph` produces the Contract 4 `graph_write` projection, delegates to the deterministic writer, constructs parameterized Cypher, and executes one transaction. Neither the agent nor the tool accepts raw Cypher from the model.
 
 ### Questions for you
 
@@ -749,50 +755,31 @@ Retry only transient connection, transaction, or Neo4j availability failures. Do
 
 ### Input shape
 
+The `write_graph` tool accepts structured resolution decisions, not the final graph projection directly:
+
 ```json
 {
   "run_id": "run-2026-09-15-001",
+  "resolution_decisions": [
+    {
+      "mention_id": "mention-1",
+      "mention": "Identity API",
+      "canonical_entity_id": "entity:identity-api",
+      "decision": "match",
+      "confidence": 0.93,
+      "candidate_ids": ["entity:identity-api", "entity:authentication-service"],
+      "rationale": "Exact normalized name and compatible entity type.",
+      "provenance": {
+        "source_chunk_id": "musique:2hop__460946_294723:paragraph:3"
+      }
+    }
+  ],
   "chunk": {
     "chunk_id": "musique:2hop__460946_294723:paragraph:3",
     "document_id": "musique:document:<normalized-title>",
     "title": "<Wikipedia title>",
     "source_split": "dev"
   },
-  "entities": [
-    {
-      "canonical_entity_id": "entity:identity-api",
-      "name": "Identity API",
-      "entity_type": "SoftwareService",
-      "provenance": ["musique:2hop__460946_294723:paragraph:3"]
-    },
-    {
-      "canonical_entity_id": "entity:user-credentials",
-      "name": "User Credentials",
-      "entity_type": "Credential",
-      "provenance": ["musique:2hop__460946_294723:paragraph:3"]
-    }
-  ],
-  "relationships": [
-    {
-      "source_entity_id": "entity:identity-api",
-      "relationship_type": "VALIDATES",
-      "target_entity_id": "entity:user-credentials",
-      "source_chunk_id": "musique:2hop__460946_294723:paragraph:3",
-      "confidence": 0.94
-    }
-  ],
-  "property_observations": [
-    {
-      "observation_id": "observation:identity-api:headquarters:chunk-3",
-      "owner_entity_id": "entity:identity-api",
-      "property_name": "headquarters",
-      "value": "Paris",
-      "source_chunk_id": "musique:2hop__460946_294723:paragraph:3",
-      "confidence": 0.88,
-      "valid_from": null,
-      "valid_to": null
-    }
-  ],
   "provenance": {
     "source_dataset": "musique",
     "source_split": "dev",
@@ -802,6 +789,10 @@ Retry only transient connection, transaction, or Neo4j availability failures. Do
   }
 }
 ```
+
+The tool validates `resolution_decisions`, deterministically constructs the `graph_write` projection shown below, and passes only that validated projection to the Neo4j writer. `uncertain`, `abstain`, and `non_match` decisions cannot create canonical entity links. Raw Cypher is not a valid field in this input contract.
+
+The `write_graph` tool returns the transactional result described in the Contract 4 output shape, including committed or updated IDs, conflict details, and errors. The Entity Resolution Agent receives this structured result rather than a database session or Cypher response.
 
 ### Write rules
 
