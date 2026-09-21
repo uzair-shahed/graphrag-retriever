@@ -8,7 +8,7 @@ This document explains how the local MuSiQue release should be used by the Self-
 - what will support later extraction, resolution, retrieval, reflection, and evaluation work;
 - what belongs to the original MuSiQue research code but is not part of this capstone implementation.
 
-The implementation roadmap in `agent-coordination/tasks.md` controls project scope. The core path is local Python execution, local MuSiQue storage, local Neo4j, LangGraph orchestration, and linear processing. Docker, Ray, Redis, PostgreSQL, Polars, DuckDB, Hybrid Search, and automatic retrieval routing are deferred unless approved as stretch work.
+The implementation roadmap in `agent-coordination/tasks.md` controls project scope. The core path is local Python execution, local MuSiQue storage, local Neo4j, LangGraph orchestration, linear processing, and Neo4j AI plugin-based retrieval. The project uses Neo4j's AI plugin to implement both GraphRAG and VectorRAG in the default runtime. Docker, Ray, Redis, PostgreSQL, Polars, DuckDB, custom hand-built retrieval layers, Hybrid Search, and automatic retrieval routing are deferred unless approved as stretch work.
 
 ## Core Technology Boundary
 
@@ -25,9 +25,9 @@ This section is the working boundary for the core implementation. It is intentio
 ### Local storage and Neo4j
 
 - Official MuSiQue JSONL files are read from local storage under `dataset/musique/data/data/`. Raw files are immutable inputs; normalization writes separate artifacts and never edits the official files in place.
-- The core graph store is one locally running Neo4j database. It stores `Document`, `Chunk`, `Entity`, optional `Mention`, and provenance/observation data. Neo4j is also the host for vector indexes if the selected retrieval implementation requires them; vector search is not required for the initial graph-write smoke test.
-- The local Neo4j instance must provide a documented connection URI, database name, credentials configuration, persistence location, transaction timeout, retry policy, initialization script, and fixture reset procedure.
-- Graph writes are performed by the local Python process through the Neo4j driver. Retrieval and reflection use bounded, read-only queries.
+- The core graph store is one locally running Neo4j database. It stores `Document`, `Chunk`, `Entity`, optional `Mention`, and provenance/observation data. Neo4j's AI plugin is the default implementation for both GraphRAG and VectorRAG retrieval, while the project continues to keep graph writes, chunk provenance, and verification logic in local Python and LangGraph.
+- The local Neo4j instance must provide a documented connection URI, database name, credentials configuration, persistence location, transaction timeout, retry policy, initialization script, plugin configuration, and fixture reset procedure.
+- Graph writes are performed by the local Python process through the Neo4j driver. Retrieval uses Neo4j AI plugin GraphRAG and VectorRAG capabilities, and reflection continues to use bounded, read-only verification queries.
 
 ### Linear processing contract
 
@@ -57,10 +57,11 @@ The following are deferred and must not be required to install, test, or run the
 - Redis session state;
 - PostgreSQL telemetry persistence;
 - S3 or other cloud object storage;
+- custom hand-built retrieval implementations that the Neo4j AI plugin replaces;
 - automatic retrieval routing;
 - Hybrid Search.
 
-Vector RAG remains a required later retrieval mode, but it must be added behind the same local Python and Neo4j boundary and must not change the initial sequential ingestion contract. These deferred technologies may be introduced only through an approved stretch decision with updated dependency, resource, and reproducibility documentation.
+Neo4j AI plugin VectorRAG and GraphRAG are the required retrieval modes for the default runtime. Custom retrieval implementations, plugin comparison baselines, and custom vector/index wrappers are moved to the deferred stretch tasks section in `agent-coordination/tasks.md` rather than treated as part of the core project path. They may be introduced only through an approved stretch decision with updated dependency, resource, and reproducibility documentation.
 
 ### Boundary evidence required before marking the roadmap item complete
 

@@ -11,7 +11,7 @@ This document defines the boundaries between the components in the current Graph
 5. What provenance must be preserved?
 6. What happens when processing fails?
 
-The current implementation boundary is local Python execution, local MuSiQue files, one locally running Neo4j instance, LangGraph orchestration, and sequential processing. MuSiQue paragraphs are the initial chunk unit. LangGraph orchestrates agent state transitions; Neo4j stores graph data, evidence, and optional vector indexes. The core contracts do not require Docker, Ray, Polars, DuckDB, Redis, PostgreSQL, cloud object storage, automatic retrieval routing, or Hybrid Search.
+The current implementation boundary is local Python execution, local MuSiQue files, one locally running Neo4j instance, LangGraph orchestration, and sequential processing. MuSiQue paragraphs are the initial chunk unit. LangGraph orchestrates agent state transitions; Neo4j stores graph data, evidence, and plugin-managed retrieval data. The core contracts use Neo4j's AI plugin for both GraphRAG and VectorRAG, and they do not require Docker, Ray, Polars, DuckDB, Redis, PostgreSQL, cloud object storage, custom hand-built retrieval implementations, automatic retrieval routing, or Hybrid Search.
 
 ### Boundary invariants
 
@@ -35,7 +35,7 @@ MuSiQue JSONL
 
 User Question
   -> Answering Agent
-  -> Retriever Agent
+  -> Neo4j AI Plugin Retriever (VectorRAG or GraphRAG)
   -> Neo4j Evidence
   -> Answering Agent
   -> Reflection Agent
@@ -80,10 +80,10 @@ graph_write projection
 
 Contract 5
 user question
-  -> read-only Neo4j evidence
+  -> read-only Neo4j evidence via the AI plugin retrieval layer
 
 Contract 6
-Neo4j evidence
+Neo4j evidence from plugin retrieval
   -> draft answer with claim-level evidence IDs
 
 Contract 7

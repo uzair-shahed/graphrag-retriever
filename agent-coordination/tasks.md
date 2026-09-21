@@ -11,7 +11,14 @@ This roadmap converts the weekly milestones in `project-idea-files/milestones.md
 
 `project-idea-files/milestones.md` remains authoritative for schedule, scope, deliverables, and advisor checkpoints. The current implementation will be developed locally with the MuSiQue dataset, local storage, a local Neo4j instance, and a linear processing flow. Docker packaging and deployment are deferred to a stretch goal. `project-idea-files/project-proposal-1.md` supplies architectural detail and motivation; where its phase wording differs, the milestone document controls.
 
-The current architecture diagram may show only the GraphRAG path while implementation details mature. Vector RAG and evaluation may remain absent from that interim diagram, but their roadmap tasks remain in scope unless the advisor formally changes the milestone plan.
+The current architecture diagram may show only the GraphRAG path while implementation details mature. The core implementation will use Neo4j's AI plugin to provide both GraphRAG and VectorRAG capabilities. Custom hand-built retrieval implementations, custom vector indexing logic, and custom wrapper logic that the plugin replaces are treated as deferred stretch tasks rather than core scope.
+
+## Neo4j AI Plugin Architecture Decision
+
+- [ ] Use Neo4j's AI plugin as the default implementation for both GraphRAG and VectorRAG in the local project runtime.
+- [ ] Keep the ingestion, extraction, entity resolution, provenance, and reflection pipeline in local Python/LangGraph; only the retrieval layer is delegated to Neo4j AI plugin capabilities when they satisfy the project requirements.
+- [ ] Preserve custom retrieval, fallback, and experimentation work as stretch-goal tasks under the deferred tasks section at the end of this roadmap.
+- [ ] Document Neo4j plugin version, configuration, feature flags, limitations, and validation checks before relying on plugin responses in evaluation.
 
 ## Definition Of Done
 
@@ -22,7 +29,7 @@ The capstone is complete when:
 - [ ] The architecture documents LangGraph, Neo4j, local storage, and a linear processing flow; Ray, Polars, Redis, PostgreSQL, and DuckDB are documented only as deferred stretch options.
 - [ ] MuSiQue official JSONL data can be validated, lightly adapted without changing source text, extracted, resolved, and stored in Neo4j with reproducible scripts; embeddings are added only where required by the selected retrieval implementation.
 - [ ] LangGraph orchestrates extraction, entity resolution, retrieval, answer generation, and reflection/self-correction.
-- [ ] Users can select Vector RAG or multi-hop Cypher traversal; the interim architecture diagram may show only the GraphRAG path, while Hybrid Search remains an advisor-approved future extension.
+- [ ] Users can select Neo4j AI plugin VectorRAG or Neo4j AI plugin GraphRAG retrieval modes, with multi-hop Cypher verification and evidence tracing retained as a required validation path; the interim architecture diagram may show only the GraphRAG path, while Hybrid Search remains an advisor-approved future extension.
 - [ ] Core evaluation artifacts are frozen, version-controlled, and reproducible.
 - [ ] Entity-resolution, retrieval-quality, latency, throughput, and cost results are reported with methodology and limitations.
 - [ ] Core benchmark targets are measured and compared against baselines; any missed targets are explained rather than hidden.
@@ -184,13 +191,14 @@ The capstone is complete when:
 - [ ] Inspect graph subgraphs after ingestion and resolution for duplicate entities, orphan nodes, broken provenance, and unexpected fragmentation.
 - [ ] Define the user query request and response contracts, including query text, retrieval mode, hop depth, top-K, citations, evidence, and trace ID.
 - [ ] Implement the query entry point with validation, timeouts, error responses, and configuration flags.
-- [ ] Implement the Vector RAG baseline using chunk embeddings, candidate ranking, context assembly, and citations.
-- [ ] Implement multi-hop Cypher traversal with bounded depth, relationship filters, candidate ranking, and evidence paths.
-- [ ] Define Hybrid Search as a future vector-seed plus local-graph-expansion extension, retaining Vector RAG and multi-hop Cypher as the two required modes.
+- [ ] Configure Neo4j AI plugin for VectorRAG and GraphRAG retrieval so the project uses plugin-managed retrieval and candidate ranking instead of hand-built retrieval code.
+- [ ] Validate plugin query output, citations, provenance, and evidence path metadata against the project contract requirements.
+- [ ] Implement multi-hop Cypher verification/tracing with bounded depth, relationship filters, candidate ranking, and evidence paths for grounded-answer validation and audit.
+- [ ] Define Hybrid Search as a future vector-seed plus graph-expansion extension, retaining Neo4j AI plugin VectorRAG and GraphRAG as the required modes.
 - [ ] Implement Hybrid Search only if the advisor approves the added scope; ensure it cannot displace either required mode.
 - [ ] Ensure retrieval results preserve source document, chunk, entity, and relationship provenance.
 - [ ] Add common answer-generation interface so both modes can be evaluated with the same output contract.
-- [ ] Add tests for mode selection, hop limits, ranking, empty results, and conflicting evidence.
+- [ ] Add tests for mode selection, hop limits, ranking, empty results, conflicting evidence, and plugin-response validation.
 
 **Deliverable**
 
@@ -295,8 +303,8 @@ The capstone is complete when:
 ### Week 10: Retrieval A/B testing and efficiency profiling
 
 - [ ] Define a fixed A/B protocol with identical questions, answer model, generation settings, context budget, and evaluation seeds where possible.
-- [ ] Execute Vector RAG and Cypher Graph retrieval on the MuSiQue query suite.
-- [ ] If approved, execute Hybrid Search using the same fixed query suite and protocol; report it as an extension rather than changing the required Vector/Cypher comparison.
+- [ ] Execute Neo4j AI plugin VectorRAG and GraphRAG retrieval on the MuSiQue query suite; keep Cypher verification as the evidence-tracing path used to audit grounded responses.
+- [ ] If approved, execute Hybrid Search using the same fixed query suite and protocol; report it as an extension rather than changing the required VectorRAG/GraphRAG comparison.
 - [ ] Preserve per-query outputs, citations, paths, latency, token usage, errors, and configuration.
 - [ ] Preserve raw-document object references and provenance through ingestion, graph construction, retrieval, reflection, and evaluation artifacts.
 - [ ] Calculate Multi-Hop Recall@K and compare against the approximately 35% baseline and >80% target.
@@ -489,3 +497,40 @@ The proposal adds architectural rationale and implementation detail; it does not
 - [ ] Tests and CI results are archived.
 - [ ] Final report, README, architecture diagrams, deck, poster, and demo are mutually consistent.
 - [ ] Advisor feedback and final sign-off are recorded.
+
+## Deferred Tasks (Stretch Goals)
+
+These items were intentionally moved from the core roadmap because they are either custom implementations that Neo4j AI plugin replaces or advanced capabilities that should only be attempted after the core ingestion, extraction, resolution, plugin-based retrieval, and grounded-answer path are working.
+
+### Deferred retrieval and plugin-replaced engineering
+
+- [ ] Build a custom hand-written Vector RAG implementation outside the Neo4j AI plugin for comparison benchmarks and educational fallback experiments.
+- [ ] Build a custom graph retrieval implementation that mimics plugin GraphRAG behavior, including manual candidate generation, ranking, and evidence assembly for ablation studies.
+- [ ] Build a custom embedding pipeline, index lifecycle, and chunk-to-vector generation workflow as a comparison baseline against Neo4j AI plugin VectorRAG.
+- [ ] Build a custom Hybrid Search retrieval stack that combines local vector search and local graph expansion outside the plugin path.
+- [ ] Evaluate a routing layer that chooses between plugin VectorRAG, plugin GraphRAG, custom retrieval baselines, and fallback behavior.
+- [ ] Add a manual retrieval fallback path that bypasses the plugin in environments where the plugin is disabled or unavailable.
+
+### Deferred platform and scaling work
+
+- [ ] Add Ray-based parallelization for ingestion, extraction, or evaluation if a milestone-approved stretch implementation requires it.
+- [ ] Add Polars or DuckDB pipelines for heavy metadata normalization, cleaning, and benchmark data preparation if approved as stretch work.
+- [ ] Add Redis-backed session or trace state for ephemeral agent telemetry if the project later expands to a multi-user or multi-run environment.
+- [ ] Add PostgreSQL-backed durable telemetry, audit logging, and historical run tracking if the telemetry stretch goal is approved.
+- [ ] Package the working local application and Neo4j environment with Docker Compose after the core workflow, evaluation, and plugin integration are complete.
+
+### Deferred validation and hardening tasks
+
+- [ ] Implement an asynchronous graph-validation agent for orphan subgraphs, duplicate identifiers, missing provenance, invalid labels, and schema violations as a stretch hardening layer.
+- [ ] Produce validation findings with severity, node and edge IDs, evidence, and remediation status.
+- [ ] Add more advanced CI, security scans, and artifact schema validation once the local plugin-based workflow is stable.
+- [ ] Add additional benchmark suites that compare plugin and custom retrieval implementations under equal conditions.
+
+### Deferred research and extension work
+
+- [ ] Explore automatic retrieval routing, query-classification heuristics, and model-aware retrieval orchestration for future extension.
+- [ ] Compare plugin GraphRAG and VectorRAG with ad hoc graph-exploration and keyword retrieval baselines under the final evaluation protocol.
+- [ ] Extend the evaluation suite to include failure-mode analysis, plugin-specific latency breakdowns, and tuning trade-offs.
+- [ ] Document plugin limitations, unsupported features, and edge cases discovered in local benchmarking.
+
+These deferred items remain valuable, but they are explicitly not required to satisfy the current capstone core implementation once the Neo4j AI plugin is accepted as the primary GraphRAG and VectorRAG mechanism.
