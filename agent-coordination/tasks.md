@@ -83,8 +83,8 @@ The capstone is complete when:
 
 ### Weeks 1-3: Preparation and environment design
 
-- [ ] Finalize architecture diagram showing ingestion, chunking, extraction, resolution, graph storage, retrieval, reflection, evaluation, and user entry point.
-- [ ] Specify service boundaries and data contracts between ingestion, agents, storage, and evaluation.
+- [x] Finalize architecture diagram showing ingestion, chunking, extraction, resolution, graph storage, retrieval, reflection, evaluation, and user entry point.
+- [x] Specify service boundaries and data contracts between ingestion, agents, storage, and evaluation.
 - [ ] Finalize the current technology boundary: local Python execution, local MuSiQue storage, a locally running Neo4j instance for graph/vector storage, and a linear ingestion and processing flow.
 - [ ] Define local MuSiQue file paths, checksums, retention behavior, access policy, source-split handling, and provenance links from dataset record to paragraph/chunk, graph entity, and benchmark record.
 - [ ] Record the deferred decision for Ray workers; the current implementation passes chunks through a linear flow without worker pools.
@@ -102,8 +102,8 @@ The capstone is complete when:
 
 ### Week 4: Local environment and storage layer
 
-- [ ] Install and run Neo4j locally with the required APOC and vector-search support.
-- [ ] Verify local Neo4j startup, persistence, restart behavior, and clean shutdown.
+- [x] Install and run Neo4j locally with the required APOC and vector-search support.
+- [x] Verify local Neo4j startup, persistence, restart behavior, and clean shutdown.
 - [ ] Implement the simplest working Neo4j connection with bounded transaction timeouts and retry behavior.
 - [ ] Create Cypher initialization scripts for constraints, indexes, full-text search, and vector indexes.
 - [ ] Write a smoke test that creates, reads, updates, and cleans up a fixture graph.

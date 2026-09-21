@@ -10,6 +10,69 @@ This document explains how the local MuSiQue release should be used by the Self-
 
 The implementation roadmap in `agent-coordination/tasks.md` controls project scope. The core path is local Python execution, local MuSiQue storage, local Neo4j, LangGraph orchestration, and linear processing. Docker, Ray, Redis, PostgreSQL, Polars, DuckDB, Hybrid Search, and automatic retrieval routing are deferred unless approved as stretch work.
 
+## Core Technology Boundary
+
+This section is the working boundary for the core implementation. It is intentionally narrower than the original proposal and must be reflected in setup instructions, dependency metadata, run scripts, and tests.
+
+### Runtime
+
+- Execution is through one local Python virtual environment on macOS. The current environment uses `/Users/uzair/Documents/capstone-project/repo/project-repo/.venv/bin/python` and Python 3.14.3.
+- The supported Python version must be confirmed by installing and smoke-testing the selected LangGraph, Neo4j driver, Pydantic, and provider dependencies. Until that compatibility check is recorded in a lockfile, Python 3.14.3 is the observed baseline, not a portability guarantee.
+- The project must add a committed dependency manifest and lockfile before calling the runtime reproducible. Core dependencies are the LangGraph runtime, Neo4j Python driver, Pydantic validation, test tooling, and provider clients only when the corresponding integration is enabled.
+- Configuration is supplied through environment variables or a local, ignored `.env` file. Secrets must never be embedded in source, fixtures, graph data, or benchmark artifacts.
+- Fixture and mock workflows must run without OpenRouter, a paid embedding service, or any other external model API.
+
+### Local storage and Neo4j
+
+- Official MuSiQue JSONL files are read from local storage under `dataset/musique/data/data/`. Raw files are immutable inputs; normalization writes separate artifacts and never edits the official files in place.
+- The core graph store is one locally running Neo4j database. It stores `Document`, `Chunk`, `Entity`, optional `Mention`, and provenance/observation data. Neo4j is also the host for vector indexes if the selected retrieval implementation requires them; vector search is not required for the initial graph-write smoke test.
+- The local Neo4j instance must provide a documented connection URI, database name, credentials configuration, persistence location, transaction timeout, retry policy, initialization script, and fixture reset procedure.
+- Graph writes are performed by the local Python process through the Neo4j driver. Retrieval and reflection use bounded, read-only queries.
+
+### Linear processing contract
+
+The supported ingestion path is sequential and deterministic:
+
+```text
+select one local JSONL split
+  -> read one record
+  -> validate the record
+  -> emit its paragraphs in source order as chunks
+  -> extract one chunk
+  -> validate the extraction
+  -> resolve its mentions
+  -> write one idempotent Neo4j transaction
+  -> record success or dead-letter failure
+```
+
+The flow has no worker pool, distributed scheduler, Ray task, or parallel graph writer. It preserves source order for reproducible logs, uses bounded retries only where the contracts permit them, and assigns one run ID to the complete invocation. A rerun of the same validated input must not create duplicate graph nodes or relationships.
+
+### Deliberately outside the core boundary
+
+The following are deferred and must not be required to install, test, or run the core fixture workflow:
+
+- Docker and Docker Compose;
+- Ray workers or Ray Data;
+- Polars and DuckDB;
+- Redis session state;
+- PostgreSQL telemetry persistence;
+- S3 or other cloud object storage;
+- automatic retrieval routing;
+- Hybrid Search.
+
+Vector RAG remains a required later retrieval mode, but it must be added behind the same local Python and Neo4j boundary and must not change the initial sequential ingestion contract. These deferred technologies may be introduced only through an approved stretch decision with updated dependency, resource, and reproducibility documentation.
+
+### Boundary evidence required before marking the roadmap item complete
+
+The project must provide:
+
+1. a pinned Python/dependency setup and environment-variable template;
+2. a local Neo4j setup, initialization, persistence, and reset procedure;
+3. a fixture command that runs without paid APIs or deferred services;
+4. a trace showing sequential record-to-chunk-to-Neo4j processing;
+5. an idempotency test showing that the fixture can be processed twice without duplicate graph data; and
+6. a decision record listing the deferred technologies and confirming that the core workflow does not import or provision them.
+
 ## What MuSiQue Is
 
 MuSiQue means **Multi-hop Questions via Single-hop Question Composition**. It is a multi-hop reading-comprehension benchmark built from Wikipedia paragraphs. A question requires combining facts from multiple paragraphs, and the dataset identifies the paragraphs that support the answer for labeled records.

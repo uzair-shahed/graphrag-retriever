@@ -11,7 +11,17 @@ This document defines the boundaries between the components in the current Graph
 5. What provenance must be preserved?
 6. What happens when processing fails?
 
-The current implementation is local, linear, and based on MuSiQue paragraphs as the initial chunk unit. LangGraph orchestrates agent state transitions; Neo4j stores graph data and evidence.
+The current implementation boundary is local Python execution, local MuSiQue files, one locally running Neo4j instance, LangGraph orchestration, and sequential processing. MuSiQue paragraphs are the initial chunk unit. LangGraph orchestrates agent state transitions; Neo4j stores graph data, evidence, and optional vector indexes. The core contracts do not require Docker, Ray, Polars, DuckDB, Redis, PostgreSQL, cloud object storage, automatic retrieval routing, or Hybrid Search.
+
+### Boundary invariants
+
+- The dataset adapter reads immutable local JSONL input and writes normalized artifacts separately.
+- The ingestion path processes records and chunks in source order in one local Python process.
+- Each chunk is validated before extraction, each extraction is validated before resolution, and only validated graph-write projections reach Neo4j.
+- Neo4j writes use bounded transactions and stable identifiers; reprocessing the same input is idempotent.
+- Retrieval and reflection use bounded, read-only Neo4j queries.
+- Fixture tests use deterministic extraction and embedding substitutes and do not require paid providers or deferred services.
+- Any change to this boundary requires an explicit decision record, updated dependency metadata, and a reproducibility test.
 
 ## Architecture Scope
 
