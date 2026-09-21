@@ -1,0 +1,60 @@
+{
+  "fixture_name": "musique_minimal_local_fixture",
+  "version": "1.0.0",
+  "purpose": "Minimal MuSiQue-shaped validation fixture for ingestion and validation tests.",
+  "schema_source": "official_musique_jsonl_shape",
+  "expected_cases": [
+    {
+      "id": "fixture_valid_multi_hop_001",
+      "record_file": "valid_records.jsonl",
+      "line": 1,
+      "expected_status": "accepted",
+      "tags": ["multi_hop", "distractor", "supporting_paragraphs"],
+      "notes": "Two-hop question with one distractor paragraph and two supporting paragraphs."
+    },
+    {
+      "id": "fixture_valid_alias_002",
+      "record_file": "valid_records.jsonl",
+      "line": 2,
+      "expected_status": "accepted",
+      "tags": ["alternate_mention", "alias"],
+      "notes": "The same entity appears under a variant name or alias, which the resolver must handle conservatively."
+    },
+    {
+      "id": "fixture_valid_unanswerable_003",
+      "record_file": "valid_records.jsonl",
+      "line": 3,
+      "expected_status": "accepted",
+      "tags": ["insufficient_evidence", "unanswerable"],
+      "notes": "Valid record with no usable answer path; useful for reflection and grounded-answer validation."
+    },
+    {
+      "id": "fixture_invalid_malformed_001",
+      "record_file": "invalid_records.jsonl",
+      "line": 1,
+      "expected_status": "rejected",
+      "tags": ["malformed_json"],
+      "notes": "Malformed JSON should fail while parsing."
+    },
+    {
+      "id": "fixture_invalid_missing_field_002",
+      "record_file": "invalid_records.jsonl",
+      "line": 2,
+      "expected_status": "rejected",
+      "tags": ["missing_optional_or_required_field"],
+      "notes": "Valid JSON but missing required MuSiQue structure or required metadata."
+    },
+    {
+      "id": "fixture_invalid_duplicate_para_idx_003",
+      "record_file": "invalid_records.jsonl",
+      "line": 3,
+      "expected_status": "dead_letter",
+      "tags": ["duplicate_paragraph_index"],
+      "notes": "Two paragraphs share the same index; valid unique paragraphs may continue while the duplicate is dead-lettered."
+    }
+  ],
+  "notes": [
+    "This fixture intentionally keeps the data set small and deterministic.",
+    "It is designed to be used before the full MuSiQue dataset is loaded or to validate local logic without external API calls."
+  ]
+}
