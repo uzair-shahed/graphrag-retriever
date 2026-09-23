@@ -1,0 +1,15 @@
+{
+  "chunk_id": "musique:fixture_valid_multi_hop_001:paragraph:1",
+  "record_id": "fixture_valid_multi_hop_001",
+  "document_id": "musique:document:aster-systems-acquisition",
+  "paragraph_idx": 1,
+  "text": "Aster Systems acquired Northwind Labs in a strategic deal announced in 2021.",
+  "title": "Aster Systems Acquisition",
+  "provenance": {
+    "source_dataset": "musique",
+    "source_split": "fixture",
+    "source_file": "tests/fixtures/musique/valid_records.jsonl",
+    "source_sha256": "fixture-sha256",
+    "source_line": 1
+  }
+}

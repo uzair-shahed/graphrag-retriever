@@ -14,16 +14,46 @@ The repository was checked against this goal before implementation work began.
 
 | Goal item | Status | Evidence |
 |---|---|---|
-| Small MuSiQue fixture exists | **Partial** | `tests/fixtures/musique/` contains valid, invalid, alias, distractor, and unanswerable record fixtures plus a manifest. |
-| Extraction-specific paragraph fixture exists | **Missing** | No `extraction_chunk.json` or normalized chunk loader exists. |
-| Extraction package exists | **Missing** | `src/graphrag_pipeline/` currently contains configuration and Neo4j storage only; there is no `extraction/` package. |
-| Extraction schemas and validation exist | **Missing** | No Pydantic extraction request/result models or evidence-span validation were found. |
+| Small MuSiQue fixture exists | **Complete** | `tests/fixtures/musique/` contains valid, invalid, alias, distractor, unanswerable, and focused extraction fixtures plus a manifest. |
+| Extraction-specific paragraph fixture exists | **Complete** | `tests/fixtures/musique/extraction_chunk.json` contains one paragraph with stable identity and provenance. |
+| Extraction package exists | **Partial** | `src/graphrag_pipeline/extraction/` now contains Contract 2 schemas; provider and agent modules remain TODO. |
+| Extraction schemas and validation exist | **Complete for the minimum contract** | Pydantic models validate required fields, provenance, evidence spans, mention references, confidence, and request/result identity. |
 | Provider boundary and deterministic mock exist | **Missing** | No `ExtractionProvider`, mock provider, or LLM provider exists. |
 | Bounded extraction retry/dead-letter workflow exists | **Missing** | Existing retries belong to Neo4j transactions, not extraction responses. |
-| Extraction-focused tests exist | **Missing** | Current tests cover configuration and Neo4j connection behavior only. |
+| Extraction-focused tests exist | **Partial** | `tests/unit/test_extraction_schemas.py` covers the frozen schema boundary; provider and agent tests remain TODO. |
 | Neo4j connection infrastructure exists | **Complete but out of scope for P0** | `Neo4jConnection` and its unit/integration tests exist; graph writes are intentionally deferred for this first agent. |
 
 Therefore, today’s extraction-agent P0 remains open. The existing MuSiQue fixtures reduce the fixture work, but they do not count as a working extraction vertical slice until one paragraph is mapped into the Contract 2 request and processed by an extraction agent.
+
+## Progress Update: Minimum Extraction Contract
+
+The first P0 task, **Freeze the minimum extraction contract**, is complete.
+
+Completed:
+
+- Added Pydantic Contract 2 models under `src/graphrag_pipeline/extraction/schemas.py`.
+- Added required request fields: `chunk_id`, `record_id`, `document_id`, `paragraph_idx`, `text`, and provenance.
+- Added required result fields: `chunk_id`, `record_id`, `chunk_text`, provenance, `mentions`, and `triples`.
+- Added evidence-span bounds and exact-text validation at the request/result boundary.
+- Added unique mention-ID and triple-to-mention reference validation.
+- Added confidence validation for the inclusive range `[0.0, 1.0]`.
+- Added `tests/fixtures/musique/extraction_chunk.json` without the gold `is_supporting` label.
+- Added six focused schema tests; all pass with `pytest`.
+- Added Pydantic to `pyproject.toml` and installed the editable project environment.
+
+Remaining for the extraction-agent P0:
+
+- Implement `ExtractionProvider` and the deterministic mock provider.
+- Implement the extraction agent and bounded retry/dead-letter behavior.
+- Add provider and agent tests, including malformed output and retry exhaustion.
+- Add the short execution trace and the documented fixture-to-agent command.
+
+Intentionally skipped for this task:
+
+- Contract 1 record adapter and full JSONL normalization.
+- LangGraph node wiring.
+- Neo4j graph writes, AI-plugin retrieval, and vector indexes.
+- Entity resolution, answering, reflection, evaluation, and production hardening.
 
 ## Working Assumption
 

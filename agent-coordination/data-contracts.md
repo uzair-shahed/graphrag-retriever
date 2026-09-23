@@ -266,7 +266,21 @@ The emitted chunk must preserve:
 
 ## Contract 2: Chunk To Extraction Agent
 
-**Status:** Specified; implementation and tests remain TODO.
+**Status:** Minimum schemas implemented and unit-tested; provider, agent, retry, and dead-letter workflow remain TODO.
+
+The implementation is in [`src/graphrag_pipeline/extraction/schemas.py`](../src/graphrag_pipeline/extraction/schemas.py). Its model-to-contract mapping is:
+
+| Implementation model or function | Contract responsibility |
+| --- | --- |
+| `Provenance` | Carries the Contract 1 source dataset, split, file, checksum, and JSONL line required by Contract 2. |
+| `ExtractionRequest` | Defines the Contract 2 model-visible chunk input and excludes gold labels such as `is_supporting`. |
+| `EvidenceSpan` | Defines Contract 2 character offsets and copied evidence text. |
+| `Mention` | Defines Contract 2 extracted entity mentions. |
+| `Triple` | Defines Contract 2 extracted relationships and confidence. |
+| `ExtractionResult` | Defines Contract 2 validated output and checks mention uniqueness and triple references. |
+| `validate_result_for_request` | Confirms result identity, source text, provenance, and evidence spans against the input request. |
+
+These models do not implement the Contract 1 record adapter, provider invocation, corrective retries, dead-letter persistence, structured execution trace, or LangGraph orchestration.
 
 ### Owner
 
