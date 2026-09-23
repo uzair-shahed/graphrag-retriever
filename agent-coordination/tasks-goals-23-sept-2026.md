@@ -76,7 +76,7 @@ entity resolution and retrieval work proceeds.
 | Small MuSiQue fixture | Complete | `tests/fixtures/musique/` contains valid, invalid, alias, distractor, unanswerable, and focused extraction fixtures plus a manifest. |
 | Focused extraction fixture | Complete | `tests/fixtures/musique/extraction_chunk.json` contains one paragraph with stable identity and provenance. |
 | Local Neo4j connection | Complete | `src/graphrag_pipeline/storage/neo4j_connection.py` and its tests provide bounded local connectivity. |
-| Neo4j GenAI Plugin capability verification | Missing | The exact plugin version, installation, configuration, and `SimpleKGPipeline` smoke test are not yet recorded. |
+| Neo4j GenAI Plugin capability verification | Partial | Neo4j Enterprise `2026.08.1`, APOC, `genai.vector.*`, and `neo4j-graphrag==1.21.0`/`SimpleKGPipeline` availability are recorded; configuration and end-to-end smoke test remain. |
 | Plugin-backed MuSiQue extraction | Missing | No active plugin adapter or fixture-to-graph command exists. |
 | Graph/provenance verification | Missing | No test proves that plugin-created graph data links back to the MuSiQue record and paragraph. |
 | Manual Contract 2 extraction path | Archived | Existing schemas/provider code is retained as fallback and is not the active implementation for this goal. |
@@ -120,8 +120,11 @@ This goal is complete only when all of the following are true:
 - Record known limitations, unsupported model providers, rate-limit behavior,
   and local resource requirements.
 
-**Evidence:** a version/capability report and a checked-in configuration
-example with secrets removed.
+- Record the results in `agent-coordination/neo4j-genai-plugin-capability-report.md`.
+
+**Evidence:** `agent-coordination/neo4j-genai-plugin-capability-report.md`, a
+version/capability report, and a checked-in configuration example with secrets
+removed.
 
 ### 2. Define the plugin input contract
 
