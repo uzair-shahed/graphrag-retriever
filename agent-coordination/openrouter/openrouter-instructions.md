@@ -18,8 +18,8 @@ Use this initial configuration:
 
 | Role | Initial model | Why |
 |---|---|---|
-| MuSiQue extraction LLM | `qwen/qwen3.8-27b:free` | Free catalog variant; listed with `structured_outputs`, tools, and a 262,144-token context window. Large enough to be a reasonable first structured extraction candidate. |
-| Embedding model | `liquid/lfm-2.5-embedding-350m:free` | Free catalog variant; OpenRouter documents 1,024-dimensional text embeddings. |
+| MuSiQue extraction LLM | `openai/gpt-4o-mini` | Low-cost OpenAI-compatible model; live strict JSON Schema probe succeeded through OpenRouter. |
+| Embedding model | `openai/text-embedding-3-small` | Low-cost OpenRouter embedding model; live probe returned 1,536-dimensional vectors. |
 | Vector similarity | cosine | Matches the project's Neo4j retrieval notes and is appropriate for normalized semantic vectors. |
 | First pipeline input | `tests/fixtures/musique/extraction_chunk.json` | Small, source-controlled, provenance-focused fixture. |
 
@@ -34,9 +34,8 @@ OpenRouter has several related concepts that should not be conflated:
 - `openrouter/auto` is the Auto Router. It chooses models using task type,
   market usage, model capability, and a cost tier. It is not a free-only
   router. It charges the normal price of whichever model it selects.
-- A model's `:free` catalog variant, such as
-  `qwen/qwen3.8-27b:free`, explicitly selects a free model entry when that
-  variant exists.
+- A model's `:free` catalog variant explicitly selects a free model entry when
+  that variant exists.
 - OpenRouter's Free Models Router is primarily described for the Chat
   Playground. For reproducible application runs, prefer a pinned `:free`
   model ID and record the exact model returned by the API.
@@ -50,14 +49,13 @@ Free endpoints can have lower rate limits, temporary unavailability, provider
 retention differences, and changing availability. A failed free request should
 be reported clearly rather than silently switching to a paid model.
 
-## Why Qwen3.8-27B Free Is The Baseline
+## Why GPT-4o Mini Is The Baseline
 
 The OpenRouter Models API was queried on 23 September 2026 with the
-`structured_outputs` filter. The catalog listed `qwen/qwen3.8-27b:free` with:
+`structured_outputs` filter. The catalog listed `openai/gpt-4o-mini` with:
 
-- prompt price: `$0`
-- completion price: `$0`
-- context length: 262,144 tokens
+- low prompt and completion pricing;
+- a context window suitable for the focused fixture;
 - `structured_outputs` support
 - `response_format` support
 - tool-choice support
@@ -72,7 +70,7 @@ structured-output support is endpoint-specific. The request must therefore set
 Recommended extraction request settings:
 
 ```text
-model: qwen/qwen3.8-27b:free
+model: openai/gpt-4o-mini
 temperature: 0 where accepted
 stream: false
 provider.require_parameters: true
@@ -81,14 +79,12 @@ on_error: RAISE
 perform_entity_resolution: false for raw-output inspection
 ```
 
-If the free endpoint is unavailable or fails the schema probe, test these
+If the selected endpoint is unavailable or fails the schema probe, test these
 low-cost structured-output alternatives, in this order:
 
-1. `qwen/qwen3.8-27b` - paid version of the same family.
-2. `deepseek/deepseek-v4-flash-0731` - low-cost, structured-output-capable
+1. `google/gemini-2.5-flash-lite` - low-cost, structured-output-capable
    model listed by the catalog.
-3. `google/gemini-2.5-flash-lite` - low-cost, structured-output-capable model.
-4. `openai/gpt-4.1-mini` - more expensive, but a conservative compatibility
+2. `openai/gpt-4.1-mini` - more expensive, but a conservative compatibility
    fallback.
 
 Prices and exact availability must be rechecked through the Models API before
@@ -100,7 +96,8 @@ benchmark or acceptance artifact.
 The OpenRouter embeddings catalog listed these relevant free options on the
 research date:
 
-- `liquid/lfm-2.5-embedding-350m:free`: 1,024 dimensions, 512-token context.
+- `openai/text-embedding-3-small`: 1,536 dimensions as measured by the live
+  probe, with low per-token pricing.
 - `nvidia/nemotron-3-embed-1b:free`: free text embedding model with a 32,768
   token context; the catalog did not expose its output dimension in the
   returned metadata, so the application must probe the vector length before
@@ -108,11 +105,9 @@ research date:
 - `nvidia/llama-nemotron-embed-vl-1b-v2:free`: free multimodal model; not
   needed for text-only MuSiQue paragraphs.
 
-Use Liquid as the first reproducible baseline only if the project chunks text
-so each embedding input is at most 512 tokens. MuSiQue paragraphs should be
-checked with the selected tokenizer before embedding. If a paragraph exceeds
-that limit, prefer the NVIDIA free text model after measuring its vector
-length, or use a low-cost paid model with a larger context.
+Use the validated OpenAI embedding model for the first reproducible baseline.
+MuSiQue paragraphs should still be checked against the model's input limit
+before embedding.
 
 The vector index dimension must be measured or verified from the actual API
 response. Do not infer an embedding dimension from the model name and do not
@@ -133,11 +128,11 @@ Required values:
 ```env
 OPENROUTER_API_KEY=replace-with-your-key
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_LLM_MODEL=qwen/qwen3.8-27b:free
-OPENROUTER_EMBEDDING_MODEL=liquid/lfm-2.5-embedding-350m:free
-OPENROUTER_EMBEDDING_DIMENSIONS=1024
+OPENROUTER_LLM_MODEL=openai/gpt-4o-mini
+OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
+OPENROUTER_EMBEDDING_DIMENSIONS=1536
 OPENROUTER_REQUIRE_PARAMETERS=true
-OPENROUTER_ALLOW_FALLBACKS=false
+OPENROUTER_ALLOW_FALLBACKS=true
 OPENROUTER_DATA_COLLECTION=deny
 OPENROUTER_SITE_URL=http://localhost
 OPENROUTER_APP_NAME=musique-graphrag
@@ -173,7 +168,7 @@ equivalent to:
 
 ```json
 {
-  "model": "qwen/qwen3.8-27b:free",
+  "model": "openai/gpt-4o-mini",
   "messages": [{"role": "user", "content": "Return a test object."}],
   "temperature": 0,
   "response_format": {

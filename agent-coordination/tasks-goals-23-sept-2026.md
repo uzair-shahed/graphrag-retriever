@@ -122,7 +122,7 @@ This goal is complete only when all of the following are true:
 
 - Record the results in `agent-coordination/neo4j-genai-plugin-capability-report.md`.
 
-**Evidence:** `agent-coordination/neo4j-genai-plugin-capability-report.md`, a
+**Evidence:** `agent-coordination/neo4j/neo4j-genai-plugin-capability-report.md`, a
 version/capability report, and a checked-in configuration example with secrets
 removed.
 
