@@ -1,5 +1,21 @@
 """Pydantic models for the minimum MuSiQue extraction contract.
 
+Last modified: 2026-09-23
+
+Purpose of this file:
+    Define and validate the Contract 2 extraction request and result models,
+    including provenance, evidence spans, mentions, relationships, and
+    confidence values.
+
+Files that use this file:
+    The extraction agent and its provider boundary use these models. The unit
+    tests in ``tests/unit/test_extraction_schemas.py`` verify their behavior.
+
+Caveats:
+    The Contract 1 record adapter, provider invocation, retry/dead-letter
+    workflow, LangGraph orchestration, entity resolution, and Neo4j persistence
+    are not implemented here.
+
 Contract coverage:
 
 * Contract 1 (MuSiQue Record To Application Chunk) supplies the provenance
@@ -16,7 +32,7 @@ from __future__ import annotations
 
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, model_validator
 
 
 class Provenance(BaseModel):
@@ -24,11 +40,11 @@ class Provenance(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source_dataset: str = Field(min_length=1)
-    source_split: str = Field(min_length=1)
-    source_file: str = Field(min_length=1)
-    source_sha256: str = Field(min_length=1)
-    source_line: int = Field(ge=1)
+    source_dataset: StrictStr = Field(min_length=1)
+    source_split: StrictStr = Field(min_length=1)
+    source_file: StrictStr = Field(min_length=1)
+    source_sha256: StrictStr = Field(min_length=1)
+    source_line: StrictInt = Field(ge=1)
 
 
 class ExtractionRequest(BaseModel):
@@ -36,12 +52,12 @@ class ExtractionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    chunk_id: str = Field(min_length=1)
-    record_id: str = Field(min_length=1)
-    document_id: str = Field(min_length=1)
-    paragraph_idx: int = Field(ge=0)
-    text: str = Field(min_length=1)
-    title: str | None = None
+    chunk_id: StrictStr = Field(min_length=1)
+    record_id: StrictStr = Field(min_length=1)
+    document_id: StrictStr = Field(min_length=1)
+    paragraph_idx: StrictInt = Field(ge=0)
+    text: StrictStr = Field(min_length=1)
+    title: StrictStr | None = None
     provenance: Provenance
 
 
@@ -50,9 +66,9 @@ class EvidenceSpan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    start: int = Field(ge=0)
-    end: int = Field(gt=0)
-    text: str = Field(min_length=1)
+    start: StrictInt = Field(ge=0)
+    end: StrictInt = Field(gt=0)
+    text: StrictStr = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_bounds_and_text(self) -> Self:
@@ -66,9 +82,9 @@ class Mention(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    mention_id: str = Field(min_length=1)
-    mention: str = Field(min_length=1)
-    entity_type: str = Field(min_length=1)
+    mention_id: StrictStr = Field(min_length=1)
+    mention: StrictStr = Field(min_length=1)
+    entity_type: StrictStr = Field(min_length=1)
     evidence_span: EvidenceSpan
 
 
@@ -77,11 +93,11 @@ class Triple(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    source_mention_id: str = Field(min_length=1)
-    relationship_type: str = Field(min_length=1)
-    target_mention_id: str = Field(min_length=1)
+    source_mention_id: StrictStr = Field(min_length=1)
+    relationship_type: StrictStr = Field(min_length=1)
+    target_mention_id: StrictStr = Field(min_length=1)
     evidence_span: EvidenceSpan
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: StrictFloat = Field(ge=0.0, le=1.0)
 
 
 class ExtractionResult(BaseModel):
@@ -89,9 +105,9 @@ class ExtractionResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    chunk_id: str = Field(min_length=1)
-    record_id: str = Field(min_length=1)
-    chunk_text: str = Field(min_length=1)
+    chunk_id: StrictStr = Field(min_length=1)
+    record_id: StrictStr = Field(min_length=1)
+    chunk_text: StrictStr = Field(min_length=1)
     provenance: Provenance
     mentions: list[Mention]
     triples: list[Triple]

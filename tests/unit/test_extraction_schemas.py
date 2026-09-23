@@ -239,3 +239,35 @@ def test_confidence_must_be_between_zero_and_one() -> None:
 
     with pytest.raises(ValidationError, match="less than or equal to 1"):
         ExtractionResult.model_validate(result)
+
+
+def test_unknown_fields_are_rejected() -> None:
+    """Reject fields outside the frozen Contract 2 schema.
+
+    Inputs:
+        None.
+    Outputs:
+        No return value; passes when an unexpected request field raises
+        ``pydantic.ValidationError``.
+    """
+    payload = json.loads(FIXTURE_PATH.read_text())
+    payload["is_supporting"] = True
+
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ExtractionRequest.model_validate(payload)
+
+
+def test_required_scalar_types_are_strict() -> None:
+    """Reject string coercion for Contract 2 integer fields.
+
+    Inputs:
+        None.
+    Outputs:
+        No return value; passes when a string paragraph index raises
+        ``pydantic.ValidationError`` instead of being coerced to an integer.
+    """
+    payload = json.loads(FIXTURE_PATH.read_text())
+    payload["paragraph_idx"] = "1"
+
+    with pytest.raises(ValidationError, match="int_type"):
+        ExtractionRequest.model_validate(payload)

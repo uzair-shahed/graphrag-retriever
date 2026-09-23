@@ -17,7 +17,7 @@ The repository was checked against this goal before implementation work began.
 | Small MuSiQue fixture exists | **Complete** | `tests/fixtures/musique/` contains valid, invalid, alias, distractor, unanswerable, and focused extraction fixtures plus a manifest. |
 | Extraction-specific paragraph fixture exists | **Complete** | `tests/fixtures/musique/extraction_chunk.json` contains one paragraph with stable identity and provenance. |
 | Extraction package exists | **Partial** | `src/graphrag_pipeline/extraction/` now contains Contract 2 schemas; provider and agent modules remain TODO. |
-| Extraction schemas and validation exist | **Complete for the minimum contract** | Pydantic models validate required fields, provenance, evidence spans, mention references, confidence, and request/result identity. |
+| Extraction schemas and validation exist | **Complete for the minimum contract** | Strict Pydantic models validate required fields, provenance, evidence spans, mention references, confidence, request/result identity, and reject unknown fields. |
 | Provider boundary and deterministic mock exist | **Missing** | No `ExtractionProvider`, mock provider, or LLM provider exists. |
 | Bounded extraction retry/dead-letter workflow exists | **Missing** | Existing retries belong to Neo4j transactions, not extraction responses. |
 | Extraction-focused tests exist | **Partial** | `tests/unit/test_extraction_schemas.py` covers the frozen schema boundary; provider and agent tests remain TODO. |
@@ -40,6 +40,7 @@ Completed:
 - Added `tests/fixtures/musique/extraction_chunk.json` without the gold `is_supporting` label.
 - Added focused tests proving the extraction fixture preserves its source paragraph and validating the Contract 2 schema boundary; all pass with `pytest`.
 - Added Pydantic to `pyproject.toml` and installed the editable project environment.
+- Added strict scalar validation and tests for unknown-field rejection and type coercion prevention.
 
 Remaining for the extraction-agent P0:
 
@@ -96,7 +97,7 @@ The goal is complete only when all of these are true:
 
    Reuse one paragraph from `tests/fixtures/musique/valid_records.jsonl` and add a focused extraction request fixture containing one paragraph with two entities and one relationship. Keep the fixture deterministic and preserve the original text exactly. Do not expand the existing multi-record fixture unless a test needs it.
 
-3. **Implement schemas and validation.**
+3. **Implement schemas and validation.** **Complete for the minimum Contract 2 scope.**
 
    Use the project's selected validation library, preferably Pydantic. Validate:
 
