@@ -18,7 +18,7 @@ The repository was checked against this goal before implementation work began.
 | Extraction-specific paragraph fixture exists | **Complete** | `tests/fixtures/musique/extraction_chunk.json` contains one paragraph with stable identity and provenance. |
 | Extraction package exists | **Partial** | `src/graphrag_pipeline/extraction/` now contains Contract 2 schemas; provider and agent modules remain TODO. |
 | Extraction schemas and validation exist | **Complete for the minimum contract** | Strict Pydantic models validate required fields, provenance, evidence spans, mention references, confidence, request/result identity, and reject unknown fields. |
-| Provider boundary and deterministic mock exist | **Missing** | No `ExtractionProvider`, mock provider, or LLM provider exists. |
+| Provider boundary and deterministic mock exist | **Complete** | `src/graphrag_pipeline/extraction/provider.py` defines `ExtractionProvider` and `DeterministicMockProvider`; focused provider tests pass. |
 | Bounded extraction retry/dead-letter workflow exists | **Missing** | Existing retries belong to Neo4j transactions, not extraction responses. |
 | Extraction-focused tests exist | **Partial** | `tests/unit/test_extraction_schemas.py` covers the frozen schema boundary; provider and agent tests remain TODO. |
 | Neo4j connection infrastructure exists | **Complete but out of scope for P0** | `Neo4jConnection` and its unit/integration tests exist; graph writes are intentionally deferred for this first agent. |
@@ -41,12 +41,12 @@ Completed:
 - Added focused tests proving the extraction fixture preserves its source paragraph and validating the Contract 2 schema boundary; all pass with `pytest`.
 - Added Pydantic to `pyproject.toml` and installed the editable project environment.
 - Added strict scalar validation and tests for unknown-field rejection and type coercion prevention.
+- Added `ExtractionProvider` and `DeterministicMockProvider` with offline, deterministic response behavior.
 
 Remaining for the extraction-agent P0:
 
-- Implement `ExtractionProvider` and the deterministic mock provider.
 - Implement the extraction agent and bounded retry/dead-letter behavior.
-- Add provider and agent tests, including malformed output and retry exhaustion.
+- Add extraction-agent tests, including malformed output and retry exhaustion.
 - Add the short execution trace and the documented fixture-to-agent command.
 
 Intentionally skipped for this task:
@@ -108,7 +108,7 @@ The goal is complete only when all of these are true:
    - confidence in the inclusive range `[0.0, 1.0]`;
    - matching input and output `chunk_id` and `record_id`.
 
-4. **Implement one provider boundary.**
+4. **Implement one provider boundary.** **Complete.**
 
    Define a small interface such as:
 
