@@ -43,6 +43,13 @@ Use `from_file=False` when supplying already-loaded MuSiQue paragraph text. The
 pipeline requires an LLM, Neo4j driver, and embedder. The project should pass
 one paragraph first, not a complete JSONL file.
 
+The project input adapter is
+`src/graphrag_pipeline/extraction/plugin_input.py`. It accepts the validated
+Contract 2 `ExtractionRequest` and returns `(text, document_metadata)` for the
+pipeline. `text` is the original paragraph unchanged. Metadata carries source
+identity and provenance; gold supervision fields are never passed to the
+plugin.
+
 ## Pipeline Components
 
 The documented KG Builder pipeline can include:

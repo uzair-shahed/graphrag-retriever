@@ -128,6 +128,15 @@ removed.
 
 ### 2. Define the plugin input contract
 
+**Decision:** The first plugin invocation receives one validated application
+chunk, representing one MuSiQue paragraph. The paragraph text is passed to
+`SimpleKGPipeline.run_async(text=...)` unchanged. Source identity and
+provenance are passed separately through `document_metadata`.
+
+The mapping is implemented by
+`src/graphrag_pipeline/extraction/plugin_input.py` and verified by
+`tests/unit/test_plugin_input.py`.
+
 - Decide whether the plugin receives one paragraph, one MuSiQue record, or a
   normalized document batch.
 - Use the existing focused extraction fixture as the first input.
@@ -140,6 +149,10 @@ removed.
   source `chunk_id` when the plugin's input format does not preserve it.
 
 **Evidence:** one documented input example and a source-to-plugin mapping test.
+The focused mapping test confirms that `text` is unchanged and that metadata
+contains `record_id`, `chunk_id`, `document_id`, `paragraph_idx`, title, source
+dataset, split, file, checksum, and source line. It also confirms that
+`is_supporting`, answers, aliases, and question decomposition are absent.
 
 ### 3. Configure a minimal `SimpleKGPipeline`
 
