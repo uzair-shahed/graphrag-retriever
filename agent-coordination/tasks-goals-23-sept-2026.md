@@ -1,232 +1,274 @@
-# One-Agent Initial Draft Goal
+# Neo4j GenAI Plugin Extraction Goal
 
 **Date:** 23 September 2026
 
+**Last modified:** 23 September 2026
+
+**Purpose of this file:**
+Track the first extraction vertical slice using Neo4j GenAI Plugin's
+`SimpleKGPipeline` as the primary MuSiQue-to-Knowledge-Graph implementation.
+This file defines the active tasks, validation evidence, scope boundaries, and
+the manual extraction implementation that is retained only as a fallback.
+
+**Files that use this file:**
+The project roadmap in `agent-coordination/tasks.md` supplies the broader
+milestones. The architecture and data contracts in
+`agent-coordination/data-contracts.md` define the interfaces that this goal
+must eventually satisfy. The source code, tests, and Neo4j setup created from
+this goal should link back to the task evidence here.
+
+**Caveats:**
+Neo4j GenAI Plugin feature names, configuration keys, supported Neo4j editions,
+and `SimpleKGPipeline` behavior must be verified against the exact local Neo4j
+and plugin versions before implementation is treated as complete. The plugin
+may create graph data directly rather than return the application's Contract 2
+mention/triple JSON shape. Until that response and provenance behavior are
+verified, the existing hand-built extraction schemas and provider are archived
+fallback work, not the active extraction path. Entity resolution policy,
+reflection, retrieval evaluation, and production hardening remain outside this
+vertical slice.
+
 ## Goal
 
-By the end of today, produce one working extraction agent that accepts one validated MuSiQue paragraph chunk and returns validated structured mentions and relationships with evidence spans, confidence, and provenance.
+By the end of this work, run one small MuSiQue fixture through a locally
+configured Neo4j GenAI Plugin `SimpleKGPipeline`, create a queryable knowledge
+graph, and verify that the resulting nodes, relationships, source text, and
+provenance satisfy the project's minimum graph contract.
 
-This is a vertical slice, not a complete GraphRAG system. Retrieval, entity resolution, graph persistence, answering, reflection, evaluation, and production hardening remain out of scope for today's goal.
-
-## Repository Audit: 23 September 2026
-
-The repository was checked against this goal before implementation work began.
-
-| Goal item | Status | Evidence |
-|---|---|---|
-| Small MuSiQue fixture exists | **Complete** | `tests/fixtures/musique/` contains valid, invalid, alias, distractor, unanswerable, and focused extraction fixtures plus a manifest. |
-| Extraction-specific paragraph fixture exists | **Complete** | `tests/fixtures/musique/extraction_chunk.json` contains one paragraph with stable identity and provenance. |
-| Extraction package exists | **Partial** | `src/graphrag_pipeline/extraction/` now contains Contract 2 schemas; provider and agent modules remain TODO. |
-| Extraction schemas and validation exist | **Complete for the minimum contract** | Strict Pydantic models validate required fields, provenance, evidence spans, mention references, confidence, request/result identity, and reject unknown fields. |
-| Provider boundary and deterministic mock exist | **Complete** | `src/graphrag_pipeline/extraction/provider.py` defines `ExtractionProvider` and `DeterministicMockProvider`; focused provider tests pass. |
-| Bounded extraction retry/dead-letter workflow exists | **Missing** | Existing retries belong to Neo4j transactions, not extraction responses. |
-| Extraction-focused tests exist | **Partial** | `tests/unit/test_extraction_schemas.py` covers the frozen schema boundary; provider and agent tests remain TODO. |
-| Neo4j connection infrastructure exists | **Complete but out of scope for P0** | `Neo4jConnection` and its unit/integration tests exist; graph writes are intentionally deferred for this first agent. |
-
-Therefore, today’s extraction-agent P0 remains open. The existing MuSiQue fixtures reduce the fixture work, but they do not count as a working extraction vertical slice until one paragraph is mapped into the Contract 2 request and processed by an extraction agent.
-
-## Progress Update: Minimum Extraction Contract
-
-The first P0 task, **Freeze the minimum extraction contract**, is complete.
-
-Completed:
-
-- Added Pydantic Contract 2 models under `src/graphrag_pipeline/extraction/schemas.py`.
-- Added required request fields: `chunk_id`, `record_id`, `document_id`, `paragraph_idx`, `text`, and provenance.
-- Added required result fields: `chunk_id`, `record_id`, `chunk_text`, provenance, `mentions`, and `triples`.
-- Added evidence-span bounds and exact-text validation at the request/result boundary.
-- Added unique mention-ID and triple-to-mention reference validation.
-- Added confidence validation for the inclusive range `[0.0, 1.0]`.
-- Added `tests/fixtures/musique/extraction_chunk.json` without the gold `is_supporting` label.
-- Added focused tests proving the extraction fixture preserves its source paragraph and validating the Contract 2 schema boundary; all pass with `pytest`.
-- Added Pydantic to `pyproject.toml` and installed the editable project environment.
-- Added strict scalar validation and tests for unknown-field rejection and type coercion prevention.
-- Added `ExtractionProvider` and `DeterministicMockProvider` with offline, deterministic response behavior.
-
-Remaining for the extraction-agent P0:
-
-- Implement the extraction agent and bounded retry/dead-letter behavior.
-- Add extraction-agent tests, including malformed output and retry exhaustion.
-- Add the short execution trace and the documented fixture-to-agent command.
-
-Intentionally skipped for this task:
-
-- Contract 1 record adapter and full JSONL normalization.
-- LangGraph node wiring.
-- Neo4j graph writes, AI-plugin retrieval, and vector indexes.
-- Entity resolution, answering, reflection, evaluation, and production hardening.
-
-## Working Assumption
-
-The first agent is the **Extraction Agent** because it is the first agent in the ingestion path:
+The active flow is:
 
 ```text
-MuSiQue record -> paragraph chunk -> Extraction Agent -> validated extraction result
+MuSiQue record
+  -> validated paragraph input
+  -> local Python pipeline configuration
+  -> Neo4j GenAI Plugin SimpleKGPipeline
+  -> Neo4j knowledge graph
+  -> deterministic graph/provenance verification
 ```
 
-The agent may use a deterministic mock provider for the initial draft. A paid model is not required to prove the contract or orchestration path.
+This is a plugin-integration vertical slice. Retrieval, answering, reflection,
+benchmarking, and custom extraction-agent implementation remain outside today's
+active scope.
+
+## Architecture Decision
+
+Neo4j GenAI Plugin is the primary extraction implementation for the current
+project path. `SimpleKGPipeline` is expected to handle the plugin-managed
+document processing, entity/relation extraction, and graph population. Local
+Python remains responsible for:
+
+- selecting and reading the MuSiQue fixture or official split;
+- preserving source text and dataset provenance;
+- supplying plugin configuration and credentials through environment variables;
+- invoking the pipeline and bounding the run;
+- inspecting and validating the resulting graph;
+- recording failures, configuration, and reproducibility evidence.
+
+The project must not assume that `SimpleKGPipeline` returns the hand-built
+`ExtractionResult` model. The integration must document the actual plugin output
+surface and map or verify it against the graph-level contracts before later
+entity resolution and retrieval work proceeds.
+
+## Repository Audit Before This Goal
+
+| Area | Status | Evidence |
+|---|---|---|
+| Small MuSiQue fixture | Complete | `tests/fixtures/musique/` contains valid, invalid, alias, distractor, unanswerable, and focused extraction fixtures plus a manifest. |
+| Focused extraction fixture | Complete | `tests/fixtures/musique/extraction_chunk.json` contains one paragraph with stable identity and provenance. |
+| Local Neo4j connection | Complete | `src/graphrag_pipeline/storage/neo4j_connection.py` and its tests provide bounded local connectivity. |
+| Neo4j GenAI Plugin capability verification | Missing | The exact plugin version, installation, configuration, and `SimpleKGPipeline` smoke test are not yet recorded. |
+| Plugin-backed MuSiQue extraction | Missing | No active plugin adapter or fixture-to-graph command exists. |
+| Graph/provenance verification | Missing | No test proves that plugin-created graph data links back to the MuSiQue record and paragraph. |
+| Manual Contract 2 extraction path | Archived | Existing schemas/provider code is retained as fallback and is not the active implementation for this goal. |
 
 ## Definition Of Done
 
-The goal is complete only when all of these are true:
+This goal is complete only when all of the following are true:
 
-- One fixture chunk can be loaded without downloading more data or contacting a paid provider.
-- The extraction input excludes gold evaluation labels such as `is_supporting`.
-- One provider call or deterministic mock call is wrapped by the agent.
-- The result is validated before it leaves the extraction boundary.
-- Valid output contains mentions, relationships, evidence spans, confidence, chunk identity, record identity, and provenance.
-- Invalid JSON or schema-invalid output is rejected.
-- The workflow has a bounded retry count, with a dead-letter/failure result after retries are exhausted.
-- At least one success test and one malformed-output failure test pass.
-- A short execution trace identifies the chunk, attempt number, validation result, and final status.
+- The exact local Neo4j and GenAI Plugin versions are recorded.
+- The supported Neo4j edition and required plugin capabilities are verified.
+- Required environment variables and secrets are documented without storing
+  credentials in the repository.
+- `SimpleKGPipeline` can be initialized from the local Python environment with
+  the selected LLM and embedding configuration.
+- One focused MuSiQue paragraph can be supplied without downloading the full
+  dataset or requiring the original AllenNLP environment.
+- The pipeline creates a graph containing inspectable source-backed entities,
+  relationships, and source/chunk provenance, or produces a documented,
+  actionable plugin limitation.
+- The fixture run is deterministic enough to be rerun and compared under a
+  fixed model, prompt, configuration, and seed where supported.
+- A test or verification script checks graph existence, expected labels or
+  equivalent plugin-created structures, source text, and provenance.
+- Plugin failures and unsupported output are reported without silently marking
+  the extraction as successful.
+- No manual extraction agent, custom extraction provider, or manual retry loop
+  is required by the active path.
 
-## Priority Order
+## Active Task Sequence
 
-### P0: Required today
+### 1. Verify Neo4j and plugin capabilities
 
-1. **Freeze the minimum extraction contract.**
+- Record the local Neo4j version, edition, database name, and connection URI.
+- Identify the exact Neo4j GenAI Plugin package/version and installation method.
+- Verify that the selected local edition supports `SimpleKGPipeline`.
+- Confirm which LLM and embedding providers the pipeline supports.
+- Confirm whether the plugin creates graph nodes and relationships directly,
+  returns intermediate extraction objects, or supports both modes.
+- Record required APOC, vector, full-text, or other plugin dependencies only if
+  `SimpleKGPipeline` actually requires them.
+- Record known limitations, unsupported model providers, rate-limit behavior,
+  and local resource requirements.
 
-   Implement only the fields already specified in Contract 2:
+**Evidence:** a version/capability report and a checked-in configuration
+example with secrets removed.
 
-   - input: `chunk_id`, `record_id`, `document_id`, `paragraph_idx`, `text`, and required provenance;
-   - output: `chunk_id`, `record_id`, `chunk_text`, provenance, `mentions`, and `triples`;
-   - mention fields: `mention_id`, `mention`, `entity_type`, `evidence_span`;
-   - triple fields: `source_mention_id`, `relationship_type`, `target_mention_id`, `evidence_span`, `confidence`.
+### 2. Define the plugin input contract
 
-2. **Create the smallest project fixture.** **Complete: ingestion fixtures and the focused extraction fixture exist and are source-validated.**
+- Decide whether the plugin receives one paragraph, one MuSiQue record, or a
+  normalized document batch.
+- Use the existing focused extraction fixture as the first input.
+- Preserve `record_id`, `paragraph_idx`, title, paragraph text, source split,
+  source file, checksum, and source line outside the model prompt if the plugin
+  does not support metadata fields.
+- Ensure gold labels such as `is_supporting`, answers, and decomposition
+  labels are not presented to the extraction system as extraction input.
+- Define how the application associates plugin-created graph data with the
+  source `chunk_id` when the plugin's input format does not preserve it.
 
-   Reuse one paragraph from `tests/fixtures/musique/valid_records.jsonl` and add a focused extraction request fixture containing one paragraph with two entities and one relationship. Keep the fixture deterministic and preserve the original text exactly. Do not expand the existing multi-record fixture unless a test needs it.
+**Evidence:** one documented input example and a source-to-plugin mapping test.
 
-3. **Implement schemas and validation.** **Complete for the minimum Contract 2 scope.**
+### 3. Configure a minimal `SimpleKGPipeline`
 
-   Use the project's selected validation library, preferably Pydantic. Validate:
+- Add the smallest local configuration needed to initialize the pipeline.
+- Keep model, embedding, database, retry, and timeout settings in environment
+  variables or ignored local configuration.
+- Use a deterministic or low-cost provider configuration for the fixture.
+- Add a dry-run or initialization check when the plugin supports one.
+- Keep the full MuSiQue dataset, paid-scale ingestion, and concurrency out of
+  this first run.
+- Document whether the pipeline writes directly to Neo4j and which database it
+  writes to.
 
-   - required IDs and provenance;
-   - unique mention IDs;
-   - valid evidence offsets and exact span text;
-   - triple references to existing mentions;
-   - confidence in the inclusive range `[0.0, 1.0]`;
-   - matching input and output `chunk_id` and `record_id`.
+**Evidence:** a reproducible fixture command and a redacted run configuration.
 
-4. **Implement one provider boundary.** **Complete.**
+### 4. Run the fixture through the plugin
 
-   Define a small interface such as:
+- Invoke `SimpleKGPipeline` with the focused MuSiQue paragraph.
+- Capture run ID, fixture ID, model/provider configuration, plugin version,
+  start/end timestamps, status, and error information.
+- Preserve the original paragraph and source provenance alongside the run.
+- Do not manually construct entities or relationships to make the smoke test
+  pass.
+- Reset the fixture graph before a clean run and verify behavior on a rerun.
 
-   ```python
-   class ExtractionProvider(Protocol):
-       def extract(self, request: ExtractionRequest) -> dict: ...
-   ```
+**Evidence:** one successful graph creation trace or one reproducible plugin
+failure report with the exact blocker.
 
-   Add a deterministic mock provider first. The agent should not know whether the provider is a mock or an LLM.
+### 5. Verify the resulting graph and provenance
 
-5. **Implement bounded retry behavior.**
+- Confirm the graph contains the plugin-created entity and relationship data.
+- Identify the actual labels, relationship types, and source-reference
+  properties created by the plugin.
+- Verify that source text and paragraph/chunk identity can be traced from the
+  graph back to the MuSiQue fixture.
+- Verify that graph inspection is read-only and does not modify the fixture.
+- Check whether repeated execution duplicates nodes, relationships, or source
+  references.
+- Record any mismatch between plugin output and Contracts 1-4.
+- Decide whether a thin provenance adapter is needed after plugin execution.
 
-   Allow the initial response plus at most two corrective retries. Retry malformed or schema-invalid responses only. Do not retry ordinary application bugs indefinitely. Return a structured failure/dead-letter result after exhaustion.
+**Evidence:** a graph verification test/query and a provenance mapping report.
 
-6. **Add focused tests.**
+### 6. Update the broader project contracts
 
-   Required tests:
+- Update Contract 2 to identify `SimpleKGPipeline` as the active extraction
+  implementation rather than a hand-built provider.
+- Define the boundary between plugin-managed extraction and local validation,
+  provenance, graph inspection, and later entity resolution.
+- Update Contract 4 with the actual plugin-created labels, relationships, and
+  source-reference fields once verified.
+- Keep manual Pydantic extraction output as a compatibility/fallback contract
+  only if it remains useful.
+- Update the main roadmap's Neo4j AI Plugin architecture decision with the
+  verified version, limitations, and evidence.
 
-   - valid deterministic extraction is accepted;
-   - invalid evidence span is rejected;
-   - unknown triple mention ID is rejected;
-   - malformed provider output is retried and then dead-lettered;
-   - extraction output never includes or consumes `is_supporting`.
+## Focused Tests And Evidence
 
-7. **Run the vertical slice.**
+The active plugin path should eventually include tests for:
 
-   The command should be one documented test or script that demonstrates:
+- plugin configuration loads without exposing secrets;
+- unsupported or missing plugin capabilities fail clearly;
+- one fixture paragraph reaches `SimpleKGPipeline` unchanged;
+- gold labels are excluded from extraction input;
+- the pipeline creates expected graph structures;
+- source provenance is preserved or is rejected when it cannot be preserved;
+- graph reset is safe and repeatable;
+- rerunning the same fixture does not silently duplicate graph data;
+- plugin errors produce a failed run artifact rather than a false success.
 
-   ```text
-   fixture chunk -> extraction agent -> validation -> structured result
-   ```
+## Explicitly Deferred From This Goal
 
-### P1: Do only if P0 is complete
-
-- Add a real LLM provider behind the same provider interface.
-- Add corrective validation-error details to retry prompts.
-- Add structured JSON logging for `run_id`, `chunk_id`, attempt, latency, and status.
-- Add one LangGraph node around the extraction agent if the LangGraph dependency is already installed and stable.
-- Add a small command-line entry point for the fixture demonstration.
-
-### P2: Explicitly defer
-
-Do not spend today's time on these tasks:
-
-- Neo4j AI plugin GraphRAG or VectorRAG setup;
-- Neo4j vector indexes, full-text indexes, or retrieval configuration;
+- full MuSiQue ingestion;
 - entity resolution and candidate ranking;
-- canonical entity IDs or graph writes;
+- Neo4j AI Plugin GraphRAG and VectorRAG query evaluation;
 - answering and reflection agents;
-- Hybrid Search or retrieval routing;
-- MuSiQue full-dataset ingestion;
-- Ray, Docker, Redis, PostgreSQL, Polars, DuckDB, or cloud storage;
-- the 150-pair entity-resolution benchmark;
-- the 30-50 query evaluation suite;
-- RAGAS, latency benchmarks, cost reports, or final metrics;
-- production retries, distributed processing, or broad CI hardening.
+- benchmark construction and RAGAS evaluation;
+- latency, throughput, and cost benchmarking;
+- Hybrid Search and retrieval routing;
+- Ray, Docker, Redis, PostgreSQL, Polars, DuckDB, and cloud storage;
+- custom extraction and retrieval implementations unless the fallback is
+  activated;
+- production hardening and broad CI work.
 
-## Suggested File Separation
+## Archived Manual Extraction Plan
 
-Keep responsibilities separate:
+The following tasks were previously the active plan for a hand-built Contract 2
+extraction agent. They are preserved for a controlled fallback if
+`SimpleKGPipeline` cannot satisfy the required extraction, provenance, or graph
+quality requirements. They are not required for the current plugin-first path.
 
-```text
-src/graphrag_pipeline/
-  extraction/
-    __init__.py
-    schemas.py          # request/result models and validation
-    provider.py         # provider protocol and deterministic mock
-    agent.py            # retry loop and extraction orchestration
+### Archived manual implementation
 
-tests/unit/
-  test_extraction_schemas.py
-  test_extraction_agent.py
+- Implement `ExtractionProvider` and a deterministic mock provider.
+- Implement an extraction agent that calls the provider, parses raw output, and
+  validates `ExtractionResult` before graph work.
+- Allow the initial provider call plus at most two corrective retries.
+- Retry malformed or schema-invalid responses only.
+- Return a structured dead-letter result after retry exhaustion.
+- Add execution traces containing run ID, chunk ID, attempt, validation status,
+  and final status.
+- Add a manual LLM provider behind the provider protocol if required.
+- Add a LangGraph extraction node if the plugin path is abandoned.
 
-tests/fixtures/
-  musique/
-    extraction_chunk.json
-```
+### Archived manual schema and test work
 
-Do not put extraction logic into the Neo4j connection module. Neo4j is not required for this first agent slice because the validated extraction result should be produced before entity resolution and graph writes.
+- Retain `src/graphrag_pipeline/extraction/schemas.py` as the fallback Contract
+  2 request/result schema.
+- Retain `src/graphrag_pipeline/extraction/provider.py` and
+  `DeterministicMockProvider` for offline fallback tests.
+- Retain `tests/unit/test_extraction_schemas.py` and
+  `tests/unit/test_extraction_provider.py` as fallback contract tests.
+- Re-enable and extend these tests only if the manual provider becomes the
+  active implementation.
 
-## Required Existing Tasks To Pull Forward
+### Fallback activation criteria
 
-From `agent-coordination/tasks.md`, today's work should pull forward only these items:
+Activate the archived manual path only after recording a decision that the
+plugin path is blocked by one or more of:
 
-- define the project-specific minimal fixture;
-- define the paragraph-as-chunk input boundary;
-- define Pydantic/Instructor schemas for entities, relations, evidence, confidence, and source spans;
-- implement strict parsing and validation for malformed or incomplete model output;
-- add bounded retries with corrective prompts and a dead-letter result;
-- build the LangGraph extraction agent or equivalent extraction orchestration;
-- create sample-chunk tests for extraction schema enforcement.
+- unavailable or incompatible `SimpleKGPipeline` capability;
+- inability to preserve source provenance;
+- graph output that cannot satisfy the required schema or graph contract;
+- unacceptable extraction quality on the approved fixture;
+- unsupported local model/provider configuration;
+- unresolved plugin reliability, cost, or resource limitations.
 
-The Neo4j connection smoke test is useful infrastructure, but it is not on the critical path for the first extraction-agent draft unless the agent is explicitly required to write to Neo4j today.
-
-## End-Of-Day Evidence
-
-Save or be able to show:
-
-- one fixture input;
-- one accepted extraction output;
-- one rejected/dead-letter output;
-- test output showing the focused tests pass;
-- the retry limit and provider configuration used;
-- a short note confirming that gold labels were not sent to the agent.
-
-A reasonable completion report is:
-
-```text
-Extraction agent draft complete.
-Input contract validated: yes
-Deterministic provider: yes
-Valid output test: passed
-Malformed output test: passed
-Retry limit: 2 corrective retries
-Neo4j write: deferred
-GraphRAG retrieval: deferred
-```
+The decision record must identify the failed plugin test, preserve its output,
+and explain why the manual implementation is the smallest viable fallback.
 
 ## Stop Condition
 
-Stop after the P0 vertical slice is demonstrably passing. Do not widen the task because the roadmap contains later work. The purpose of today is to establish one trustworthy agent boundary that the later LangGraph, entity-resolution, Neo4j, retrieval, and reflection work can consume.
+Stop after the focused `SimpleKGPipeline` run and graph/provenance verification
+are reproducible. Do not begin retrieval benchmarking or rebuild the manual
+extraction agent unless the plugin path fails its documented activation criteria.
