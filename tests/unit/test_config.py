@@ -1,0 +1,61 @@
+"""Unit tests for `Neo4jSettings` env parsing. No network access required."""
+
+from __future__ import annotations
+
+import pytest
+
+from graphrag_pipeline.config import Neo4jSettings
+
+
+def test_from_env_reads_required_and_default_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
+    monkeypatch.setenv("NEO4J_USERNAME", "neo4j")
+    monkeypatch.setenv("NEO4J_PASSWORD", "test-password")
+    monkeypatch.delenv("NEO4J_DATABASE", raising=False)
+    monkeypatch.delenv("NEO4J_CONNECTION_TIMEOUT_SECONDS", raising=False)
+
+    settings = Neo4jSettings.from_env()
+
+    assert settings.uri == "bolt://localhost:7687"
+    assert settings.username == "neo4j"
+    assert settings.password == "test-password"
+    assert settings.database == "neo4j"
+    assert settings.connection_timeout_seconds == 5.0
+    assert settings.max_transaction_retry_time_seconds == 15.0
+    assert settings.transaction_timeout_seconds == 10.0
+
+
+def test_from_env_reads_overridden_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
+    monkeypatch.setenv("NEO4J_USERNAME", "neo4j")
+    monkeypatch.setenv("NEO4J_PASSWORD", "test-password")
+    monkeypatch.setenv("NEO4J_DATABASE", "fixture-db")
+    monkeypatch.setenv("NEO4J_CONNECTION_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setenv("NEO4J_MAX_TRANSACTION_RETRY_TIME_SECONDS", "20")
+    monkeypatch.setenv("NEO4J_TRANSACTION_TIMEOUT_SECONDS", "1")
+
+    settings = Neo4jSettings.from_env()
+
+    assert settings.database == "fixture-db"
+    assert settings.connection_timeout_seconds == 2.5
+    assert settings.max_transaction_retry_time_seconds == 20.0
+    assert settings.transaction_timeout_seconds == 1.0
+
+
+def test_from_env_requires_uri_username_and_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NEO4J_URI", raising=False)
+    monkeypatch.delenv("NEO4J_USERNAME", raising=False)
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+
+    with pytest.raises(ValueError):
+        Neo4jSettings.from_env()
+
+
+def test_from_env_rejects_non_numeric_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:7687")
+    monkeypatch.setenv("NEO4J_USERNAME", "neo4j")
+    monkeypatch.setenv("NEO4J_PASSWORD", "test-password")
+    monkeypatch.setenv("NEO4J_CONNECTION_TIMEOUT_SECONDS", "not-a-number")
+
+    with pytest.raises(ValueError):
+        Neo4jSettings.from_env()
