@@ -40,7 +40,9 @@ from graphrag_pipeline.extraction.schemas import (
 )
 
 
-FIXTURE_PATH = Path(__file__).parents[1] / "fixtures" / "musique" / "extraction_chunk.json"
+FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "musique"
+FIXTURE_PATH = FIXTURE_DIR / "extraction_chunk.json"
+SOURCE_RECORDS_PATH = FIXTURE_DIR / "valid_records.jsonl"
 
 
 def load_request() -> ExtractionRequest:
@@ -125,6 +127,29 @@ def test_request_fixture_excludes_gold_support_label() -> None:
 
     assert request.text.startswith("Aster Systems acquired")
     assert "is_supporting" not in request.model_dump()
+
+
+def test_extraction_fixture_preserves_source_paragraph() -> None:
+    """Ensure the focused fixture is copied exactly from the ingestion fixture.
+
+    Inputs:
+        None. The focused extraction fixture declares its source file and line.
+    Outputs:
+        No return value; passes when source record identity, paragraph metadata,
+        title, and text match exactly.
+    """
+    request = load_request()
+    source_lines = SOURCE_RECORDS_PATH.read_text().splitlines()
+    source_record = json.loads(source_lines[request.provenance.source_line - 1])
+    source_paragraph = next(
+        paragraph
+        for paragraph in source_record["paragraphs"]
+        if paragraph["idx"] == request.paragraph_idx
+    )
+
+    assert request.record_id == source_record["id"]
+    assert request.title == source_paragraph["title"]
+    assert request.text == source_paragraph["paragraph_text"]
 
 
 def test_valid_result_preserves_contract_identity_and_provenance() -> None:

@@ -38,7 +38,7 @@ Completed:
 - Added unique mention-ID and triple-to-mention reference validation.
 - Added confidence validation for the inclusive range `[0.0, 1.0]`.
 - Added `tests/fixtures/musique/extraction_chunk.json` without the gold `is_supporting` label.
-- Added six focused schema tests; all pass with `pytest`.
+- Added focused tests proving the extraction fixture preserves its source paragraph and validating the Contract 2 schema boundary; all pass with `pytest`.
 - Added Pydantic to `pyproject.toml` and installed the editable project environment.
 
 Remaining for the extraction-agent P0:
@@ -92,7 +92,7 @@ The goal is complete only when all of these are true:
    - mention fields: `mention_id`, `mention`, `entity_type`, `evidence_span`;
    - triple fields: `source_mention_id`, `relationship_type`, `target_mention_id`, `evidence_span`, `confidence`.
 
-2. **Create the smallest project fixture.** **Partial: ingestion fixtures already exist; extraction fixture still required.**
+2. **Create the smallest project fixture.** **Complete: ingestion fixtures and the focused extraction fixture exist and are source-validated.**
 
    Reuse one paragraph from `tests/fixtures/musique/valid_records.jsonl` and add a focused extraction request fixture containing one paragraph with two entities and one relationship. Keep the fixture deterministic and preserve the original text exactly. Do not expand the existing multi-record fixture unless a test needs it.
 
