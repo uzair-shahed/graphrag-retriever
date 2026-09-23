@@ -111,9 +111,9 @@ The capstone is complete when:
 
 - [x] Install and run Neo4j locally with the required APOC and vector-search support.
 - [x] Verify local Neo4j startup, persistence, restart behavior, and clean shutdown.
-- [ ] Implement the simplest working Neo4j connection with bounded transaction timeouts and retry behavior.
+- [x] Implement the simplest working Neo4j connection with bounded transaction timeouts and retry behavior.
 - [ ] Create Cypher initialization scripts for constraints, indexes, full-text search, and vector indexes.
-- [ ] Write a smoke test that creates, reads, updates, and cleans up a fixture graph.
+- [x] Write a smoke test that creates, reads, updates, and cleans up a fixture graph.
 - [ ] Implement one MuSiQue download/verification and local dataset connection path for the official JSONL files. -- (i'm not sure if this is needed since we already have the downloaded dataset)
 - [ ] Validate and lightly adapt MuSiQue records while preserving original IDs, question text, paragraph text, titles, indices, supporting labels, and optional answer metadata.
 - [ ] Distinguish labeled train/dev records from test records with withheld labels; never evaluate test records as labeled data.
