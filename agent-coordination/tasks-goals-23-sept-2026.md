@@ -156,6 +156,27 @@ dataset, split, file, checksum, and source line. It also confirms that
 
 ### 3. Configure a minimal `SimpleKGPipeline`
 
+**Decision:** Use the installed GraphRAG OpenAI-compatible implementations with
+OpenRouter's configured base URL. The factory in
+`src/graphrag_pipeline/extraction/pipeline.py` builds the pipeline from
+environment settings and does not perform LLM or embedding calls during
+construction.
+
+The first-run configuration is:
+
+- LLM: `openai/gpt-4o-mini`
+- Embedder: `openai/text-embedding-3-small`
+- embedding dimension expectation: `1536`
+- `from_file=False`
+- `on_error="RAISE"`
+- `perform_entity_resolution=False`
+- database: `neo4j`
+- GraphRAG dependency: `neo4j-graphrag[openai]>=1.21,<2`
+
+The factory and settings parsing are covered by
+`tests/unit/test_pipeline.py`. Live initialization against the local Neo4j
+database passed without making provider inference calls.
+
 - Add the smallest local configuration needed to initialize the pipeline.
 - Keep model, embedding, database, retry, and timeout settings in environment
   variables or ignored local configuration.
@@ -167,6 +188,9 @@ dataset, split, file, checksum, and source line. It also confirms that
   writes to.
 
 **Evidence:** a reproducible fixture command and a redacted run configuration.
+The live initialization check reported `pipeline_initialization=passed` with
+the configured database, models, flags, and embedding dimension. Provider
+inference remains part of Task 4, when the focused fixture is run.
 
 ### 4. Run the fixture through the plugin
 

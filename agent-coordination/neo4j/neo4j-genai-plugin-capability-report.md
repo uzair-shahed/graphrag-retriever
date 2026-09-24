@@ -90,6 +90,7 @@ not recorded in this report.
 | Capability | Result | Evidence |
 |---|---|---|
 | Required OpenRouter configuration fields | Passed | Local redacted configuration check found no missing required fields. |
+| GraphRAG OpenAI provider extra | Passed | `neo4j-graphrag[openai]` is declared and `openai==3.19.1` imports successfully. |
 | LLM catalog entry `openai/gpt-4o-mini` | Passed | Live OpenRouter structured-output catalog query found the configured model. |
 | LLM structured-output catalog flag | Passed | The live catalog advertises `structured_outputs` and `response_format`. |
 | Strict JSON Schema request | Passed | OpenRouter accepted the strict schema request and returned the requested `openai/gpt-4o-mini` model. |
@@ -97,6 +98,7 @@ not recorded in this report.
 | Embedding request | Passed | Live request returned a numeric vector. |
 | Measured embedding dimension | Passed | Returned dimension was 1,536, matching configuration. |
 | OpenRouter fallback behavior | Explicitly configured | Active configuration permits fallbacks, while `require_parameters=true` restricts providers to those supporting the requested schema. |
+| Live `SimpleKGPipeline` initialization | Passed | Local Neo4j driver and configured OpenRouter providers initialized with `from_file=False`, `on_error=RAISE`, and entity resolution disabled. |
 
 The updated paid low-cost endpoint completed the structured-output probe
 without a rate-limit error. The returned model matched the configured model.
@@ -119,10 +121,10 @@ describes `neo4j-genai` as its deprecated predecessor.
 
 - Record the exact local Neo4j installation method and APOC/plugin configuration. **Passed:** Neo4j Desktop, APOC installed through Desktop, local database running, isolated fixture reset permitted.
 - Select and document an LLM provider and embedding provider. **Passed:** OpenRouter models are recorded in `agent-coordination/openrouter/openrouter-instructions.md` and the local `.env`.
-- Add the required provider extra to the dependency configuration, if needed. **Passed:** `neo4j-graphrag[openai]` is declared in `pyproject.toml`; installation verification remains part of the environment check.
+- Add the required provider extra to the dependency configuration, if needed. **Passed:** `neo4j-graphrag[openai]` is declared in `pyproject.toml` and installation/import verification passed.
 - Confirm that the selected provider works with Python 3.14.3 and structured output if structured extraction is required. **Passed:** catalog support, strict JSON Schema request, and returned-model verification succeeded.
 - Initialize `SimpleKGPipeline` with the local Neo4j driver without exposing
-  secrets.
+  secrets. **Passed:** live local initialization completed with no secret output.
 - Run the focused MuSiQue fixture through the pipeline.
 - Inspect the resulting labels, relationships, lexical graph, entity-resolution
   behavior, and source-reference properties.
