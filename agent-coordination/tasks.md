@@ -11,7 +11,26 @@ This roadmap converts the weekly milestones in `project-idea-files/milestones.md
 
 `project-idea-files/milestones.md` remains authoritative for schedule, scope, deliverables, and advisor checkpoints. The current implementation will be developed locally with the MuSiQue dataset, local storage, a local Neo4j instance, and a linear processing flow. Docker packaging and deployment are deferred to a stretch goal. `project-idea-files/project-proposal-1.md` supplies architectural detail and motivation; where its phase wording differs, the milestone document controls.
 
-The current architecture diagram may show only the GraphRAG path while implementation details mature. The core implementation will use Neo4j's AI plugin to provide both GraphRAG and VectorRAG capabilities. Custom hand-built retrieval implementations, custom vector indexing logic, and custom wrapper logic that the plugin replaces are treated as deferred stretch tasks rather than core scope.
+The current architecture uses Neo4j's AI plugin for extraction and will use its GraphRAG and VectorRAG capabilities for retrieval. Custom hand-built extraction, retrieval, vector indexing, and plugin-replacement wrappers are archived rather than active core work. The current verified vertical slice is the local MuSiQue paragraph-to-`SimpleKGPipeline`-to-Neo4j graph path with read-only provenance verification.
+
+## Current Implementation Status
+
+Completed and verified:
+
+- Local Neo4j Enterprise connectivity, bounded transactions, and connection smoke tests.
+- Focused MuSiQue fixtures with validated chunk identity and source provenance.
+- OpenRouter-backed `SimpleKGPipeline` configuration using `neo4j-graphrag==1.21.0`.
+- Plugin input mapping that preserves paragraph text, carries provenance, and excludes gold labels.
+- A live focused fixture run that persisted plugin-created nodes and relationships in Neo4j.
+- Read-only graph and provenance verification for `Document`, `Chunk`, source links, and extracted relationships.
+- Active data-contract and capability documentation, with the superseded task plan preserved in `agent-coordination/archive/tasks_archive.md`.
+
+Still active:
+
+- Idempotent graph reset and rerun checks.
+- Neo4j AI plugin VectorRAG and GraphRAG retrieval integration.
+- LangGraph orchestration around extraction, retrieval, answer generation, and reflection.
+- Evaluation artifacts, benchmark methodology, and broader end-to-end tests.
 
 ## Neo4j AI Plugin Architecture Decision
 
@@ -24,10 +43,10 @@ The current architecture diagram may show only the GraphRAG path while implement
 
 The capstone is complete when:
 
-- [ ] The complete core pipeline runs locally from a documented local development workflow.
+- [x] The focused extraction vertical slice runs locally from a documented local development workflow.
 - [ ] Docker Compose packaging and deployment are documented and implemented only as a stretch goal after the core pipeline is complete.
 - [ ] The architecture documents LangGraph, Neo4j, local storage, and a linear processing flow; Ray, Polars, Redis, PostgreSQL, and DuckDB are documented only as deferred stretch options.
-- [ ] MuSiQue official JSONL data can be validated, lightly adapted without changing source text, extracted, resolved, and stored in Neo4j with reproducible scripts; embeddings are added only where required by the selected retrieval implementation.
+- [ ] MuSiQue official JSONL data can be validated, lightly adapted without changing source text, extracted, resolved, and stored in Neo4j with reproducible scripts; the focused fixture extraction and provenance path are complete, while full ingestion and entity resolution remain open.
 - [ ] LangGraph orchestrates extraction, entity resolution, retrieval, answer generation, and reflection/self-correction.
 - [ ] Users can select Neo4j AI plugin VectorRAG or Neo4j AI plugin GraphRAG retrieval modes, with multi-hop Cypher verification and evidence tracing retained as a required validation path; the interim architecture diagram may show only the GraphRAG path, while Hybrid Search remains an advisor-approved future extension.
 - [ ] Core evaluation artifacts are frozen, version-controlled, and reproducible.
@@ -98,14 +117,14 @@ The capstone is complete when:
 - [ ] Define the initial Neo4j labels, relationships, properties, provenance fields, and identifiers needed by ingestion and evaluation.
 - [ ] Record basic local resource requirements for the linear flow; defer detailed capacity planning until benchmarking.
 - [ ] Define the OpenRouter model, token, retry, and concurrency assumptions used by the budget.
-- [ ] Create a project-specific minimal fixture based on the official MuSiQue schema, including multi-hop evidence, distractors, alternate mentions, malformed input, missing optional fields, and insufficient/unanswerable cases where needed.
-- [ ] Define the paragraph-as-chunk contract: initially preserve each MuSiQue paragraph as one chunk with stable IDs, supporting labels, and source provenance; add sub-chunking only if later required by context limits or retrieval quality.
+- [x] Create a project-specific minimal fixture based on the official MuSiQue schema, including multi-hop evidence, distractors, alternate mentions, malformed input, missing optional fields, and insufficient/unanswerable cases where needed.
+- [x] Define the paragraph-as-chunk contract: initially preserve each MuSiQue paragraph as one chunk with stable IDs, supporting labels, and source provenance; add sub-chunking only if later required by context limits or retrieval quality.
 
 **Acceptance criteria**
 
 - [ ] Architecture and data-flow diagrams are reviewed by the advisor.
 - [ ] Service contracts and configuration names are documented.
-- [ ] A small fixture can be used without downloading the full dataset or calling a paid model.
+- [x] A small fixture can be used without downloading the full dataset or calling a paid model for local validation and pipeline initialization.
 
 ### Week 4: Local environment and storage layer
 
@@ -115,13 +134,13 @@ The capstone is complete when:
 - [ ] Create Cypher initialization scripts for constraints, indexes, full-text search, and vector indexes.
 - [x] Write a smoke test that creates, reads, updates, and cleans up a fixture graph.
 - [ ] Implement one MuSiQue download/verification and local dataset connection path for the official JSONL files. -- (i'm not sure if this is needed since we already have the downloaded dataset)
-- [ ] Validate and lightly adapt MuSiQue records while preserving original IDs, question text, paragraph text, titles, indices, supporting labels, and optional answer metadata.
+- [x] Validate and lightly adapt the focused MuSiQue fixture while preserving original IDs, paragraph text, titles, indices, and provenance; full official-split adaptation remains open.
 - [ ] Distinguish labeled train/dev records from test records with withheld labels; never evaluate test records as labeled data.
-- [ ] Expose each paragraph as one deterministic application chunk with stable record, document, paragraph, and chunk IDs; defer configurable sub-chunking unless needed.
+- [x] Expose the focused paragraph as one deterministic application chunk with stable record, document, paragraph, and chunk IDs; defer configurable sub-chunking unless needed.
 - [ ] Handle malformed dataset records, missing metadata, duplicate records, and unsupported records explicitly.
 - [ ] Create an OpenRouter cost budget using expected input/output tokens, model pricing, retries, concurrency, and dataset volume; keep the initial fixture path free of paid calls.
 - [ ] Implement a minimal LangGraph loop with one validated LLM call and observable state transitions.
-- [ ] Verify that the core MuSiQue pipeline runs locally without Docker and document only the prerequisites needed to reproduce it.
+- [x] Verify that the focused MuSiQue extraction pipeline runs locally without Docker and document the prerequisites needed to reproduce it.
 
 **Deliverables**
 
@@ -133,9 +152,9 @@ The capstone is complete when:
 
 **Acceptance criteria**
 
-- [ ] A clean checkout can install prerequisites, start local Neo4j, and run the fixture workflow using documented commands.
+- [x] The current checkout can install prerequisites, start local Neo4j, and run the focused fixture workflow using documented commands.
 - [ ] Initialization is idempotent and creates the expected constraints and indexes.
-- [ ] A project fixture and a sampled labeled MuSiQue record can be loaded and queried without requiring the original AllenNLP training environment.
+- [x] The project fixture can be loaded and queried without requiring the original AllenNLP training environment; sampled full-record ingestion remains open.
 - [ ] Connection and resource settings are recorded for the advisor.
 
 **Advisor checkpoint**
@@ -151,33 +170,32 @@ The capstone is complete when:
 
 ## Phase 2: LangGraph Multi-Agent Engine And Parallelization
 
-### Week 5: Extraction and autonomous entity resolution
+### Week 5: Plugin extraction and autonomous entity resolution
 
-- [ ] Finalize the Neo4j property-graph schema: node labels, edge types, property keys, provenance, confidence, and source references.
-- [ ] Implement Cypher drivers for graph initialization, index creation, vector configuration, and fixture reset.
-- [ ] Define Pydantic/Instructor schemas for entities, relations, properties, evidence, confidence, and source spans.
-- [ ] Implement strict parsing and validation for malformed, incomplete, contradictory, or extra model output.
-- [ ] Add bounded retries with corrective prompts and a dead-letter result for records that remain invalid.
-- [ ] Build the LangGraph extraction agent and expose a stable chunk-to-validated-triples interface.
-- [ ] Implement extraction through the linear flow; add Ray-parallelized extraction with `@ray.remote` workers only if an approved stretch goal requires it.
+- [x] Record the verified plugin-created graph vocabulary, source references, and provenance fields for the focused fixture.
+- [ ] Implement Cypher drivers for graph initialization, index creation, vector configuration, and fixture reset; plugin-managed extraction writes remain the active graph-write path.
+- [x] Define and validate the plugin input boundary for one MuSiQue paragraph, including text preservation and exclusion of gold labels.
+- [x] Configure and run `SimpleKGPipeline` through the linear local flow, with plugin failures raised rather than reported as success.
+- [ ] Build the LangGraph orchestration around plugin extraction only after retrieval and answer-generation boundaries are defined.
+- [ ] Implement extraction through the linear flow; add Ray-parallelized extraction only if an approved stretch goal requires it.
 - [ ] Build embedding generation and candidate entity retrieval with configurable similarity thresholds and top-K values.
 - [ ] Build the entity-resolution agent that combines vector candidates with contextual LLM reasoning.
 - [ ] Define match, non-match, uncertain, and abstain outcomes.
 - [ ] Implement atomic Cypher `MERGE` transactions for canonical entities and synonymous mentions.
 - [ ] Implement conflict-resolution rules for properties, provenance, confidence, timestamps, and incompatible values.
-- [ ] Make graph writes idempotent and record resolution decisions for later audit.
-- [ ] Create sample-chunk tests for extraction precision, schema enforcement, entity matches, non-matches, and conflicts.
+- [ ] Make plugin fixture reset and rerun behavior idempotent and record the result for later audit.
+- [x] Create focused tests for plugin input, configuration, schema boundaries, and graph/provenance verification.
 
 **Deliverables**
 
 - [ ] Functional Neo4j schema and initialization driver.
-- [ ] Scalable validated triple-extraction service.
-- [ ] Linear extraction path with reproducible processing results.
+- [x] Focused plugin-managed extraction vertical slice with graph/provenance verification.
+- [x] Linear plugin extraction path with reproducible processing inputs and recorded live-run evidence.
 - [ ] Autonomous entity-resolution agent with inline deduplication.
 
 **Acceptance criteria**
 
-- [ ] Invalid model output cannot reach Neo4j.
+- [x] Plugin/provider failures are raised rather than silently reported as successful extraction; deeper output-quality validation remains a future retrieval/evaluation concern.
 - [ ] Reprocessing the same chunk does not duplicate graph entities or relationships.
 - [ ] Entity-resolution decisions include candidates, rationale/result, threshold/configuration, and provenance.
 - [ ] Sample metrics and representative errors are recorded.
@@ -435,15 +453,15 @@ Stretch work begins only after core functionality, evaluation, and advisor appro
 
 | Milestone requirement | Implementation location in this roadmap | Evidence |
 |---|---|---|
-| MuSiQue ingestion | Week 4 ingestion tasks | Dataset scripts, manifest, sample load report |
+| MuSiQue ingestion | Week 4 ingestion tasks | Dataset scripts, manifest, focused fixture and provenance tests |
 | OpenRouter cost budget | Week 4 cost tasks | Budget spreadsheet/report and token assumptions |
 | Neo4j, APOC, vector search | Week 4 local environment tasks | Local Neo4j setup, initialization smoke test |
 | LangGraph agent loop | Week 4 and Week 7 | Smoke-test trace and end-to-end trace |
 | Neo4j schema and Cypher drivers | Week 5 | Schema document, migration/init scripts, tests |
-| Structured triple extraction | Week 5 | Pydantic/Instructor schemas, validation tests, raw results |
-| Linear extraction flow | Weeks 4-5 | Deterministic processing logs, throughput benchmark, error report |
+| Plugin-managed extraction | Week 5 | `SimpleKGPipeline`, plugin input adapter, live fixture run, graph verification |
+| Linear plugin extraction flow | Weeks 4-5 | Fixture runner, configuration tests, live run summary, provenance verification |
 | Autonomous entity resolution | Week 5 and Week 9 | Resolution audit records, precision/recall report |
-| Configurable Vector/Cypher retrieval | Week 6 and Week 10 | Query API contract, A/B outputs, ranking tests |
+| Configurable plugin VectorRAG/GraphRAG retrieval | Week 6 and Week 10 | Query API contract, plugin outputs, Cypher evidence checks, ranking tests |
 | Reflection and self-correction | Week 7 | State graph, grounding tests, retry traces |
 | 150-pair entity dataset | Week 8 | Frozen labeled JSON/CSV, guidelines, manifest |
 | 30-50 multi-hop queries | Week 8 | Frozen query set, gold facts, graph paths |
@@ -502,14 +520,17 @@ The proposal adds architectural rationale and implementation detail; it does not
 
 These items were intentionally moved from the core roadmap because they are either custom implementations that Neo4j AI plugin replaces or advanced capabilities that should only be attempted after the core ingestion, extraction, resolution, plugin-based retrieval, and grounded-answer path are working.
 
-### Deferred retrieval and plugin-replaced engineering
+### Active plugin retrieval and future extensions
 
-- [ ] Build a custom hand-written Vector RAG implementation outside the Neo4j AI plugin for comparison benchmarks and educational fallback experiments.
-- [ ] Build a custom graph retrieval implementation that mimics plugin GraphRAG behavior, including manual candidate generation, ranking, and evidence assembly for ablation studies.
-- [ ] Build a custom embedding pipeline, index lifecycle, and chunk-to-vector generation workflow as a comparison baseline against Neo4j AI plugin VectorRAG.
-- [ ] Build a custom Hybrid Search retrieval stack that combines local vector search and local graph expansion outside the plugin path.
-- [ ] Evaluate a routing layer that chooses between plugin VectorRAG, plugin GraphRAG, custom retrieval baselines, and fallback behavior.
-- [ ] Add a manual retrieval fallback path that bypasses the plugin in environments where the plugin is disabled or unavailable.
+- [ ] Configure and validate Neo4j AI plugin VectorRAG retrieval.
+- [ ] Configure and validate Neo4j AI plugin GraphRAG retrieval.
+- [ ] Preserve bounded multi-hop Cypher verification and source-evidence tracing for grounded-answer validation.
+- [ ] Evaluate plugin VectorRAG and GraphRAG using the same frozen query suite and answer contract.
+- [ ] Add retrieval routing only after both required plugin modes have been validated.
+- [ ] Implement Hybrid Search only as an advisor-approved extension that does not replace either required plugin mode.
+
+Custom extraction and retrieval replacements are preserved in
+`agent-coordination/archive/tasks_archive.md` and are not active core tasks.
 
 ### Deferred platform and scaling work
 
