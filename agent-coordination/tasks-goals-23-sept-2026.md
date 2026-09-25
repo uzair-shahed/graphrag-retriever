@@ -228,6 +228,11 @@ text and embedding are stored on `Chunk`. Source metadata is stored on the
 split, file, and source line. The `ACQUIRED` relationship contains
 `since: 2021`.
 
+The project now includes a minimal read-only verification helper in
+`src/graphrag_pipeline/verification.py` and a focused test suite in
+`tests/unit/test_graph_verifier.py` so the graph contract can be asserted
+without manual inspection.
+
 - Confirm the graph contains the plugin-created entity and relationship data.
 - Identify the actual labels, relationship types, and source-reference
   properties created by the plugin.
