@@ -50,6 +50,10 @@ pipeline. `text` is the original paragraph unchanged. Metadata carries source
 identity and provenance; gold supervision fields are never passed to the
 plugin.
 
+GraphRAG 1.21.0 validates document metadata values as strings. The adapter
+therefore serializes `source_line` and `paragraph_idx` at this boundary; the
+validated application request retains them as integers.
+
 ## Pipeline Components
 
 The documented KG Builder pipeline can include:

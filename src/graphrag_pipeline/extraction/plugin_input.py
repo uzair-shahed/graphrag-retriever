@@ -14,11 +14,11 @@ class PluginDocumentMetadata(TypedDict):
     source_split: str
     source_file: str
     source_sha256: str
-    source_line: int
+    source_line: str
     record_id: str
     chunk_id: str
     document_id: str
-    paragraph_idx: int
+    paragraph_idx: str
     title: str | None
 
 
@@ -36,11 +36,11 @@ def build_plugin_input(
         "source_split": request.provenance.source_split,
         "source_file": request.provenance.source_file,
         "source_sha256": request.provenance.source_sha256,
-        "source_line": request.provenance.source_line,
+        "source_line": str(request.provenance.source_line),
         "record_id": request.record_id,
         "chunk_id": request.chunk_id,
         "document_id": request.document_id,
-        "paragraph_idx": request.paragraph_idx,
+        "paragraph_idx": str(request.paragraph_idx),
         "title": request.title,
     }
     return request.text, metadata

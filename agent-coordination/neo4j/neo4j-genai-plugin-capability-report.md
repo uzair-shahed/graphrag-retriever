@@ -99,6 +99,7 @@ not recorded in this report.
 | Measured embedding dimension | Passed | Returned dimension was 1,536, matching configuration. |
 | OpenRouter fallback behavior | Explicitly configured | Active configuration permits fallbacks, while `require_parameters=true` restricts providers to those supporting the requested schema. |
 | Live `SimpleKGPipeline` initialization | Passed | Local Neo4j driver and configured OpenRouter providers initialized with `from_file=False`, `on_error=RAISE`, and entity resolution disabled. |
+| Focused fixture execution | Passed | Run ID `de0b6bc5-f9c3-4725-a954-d1c9ab4f05e7`; graph persisted in the local `neo4j` database. |
 
 The updated paid low-cost endpoint completed the structured-output probe
 without a rate-limit error. The returned model matched the configured model.
@@ -125,9 +126,12 @@ describes `neo4j-genai` as its deprecated predecessor.
 - Confirm that the selected provider works with Python 3.14.3 and structured output if structured extraction is required. **Passed:** catalog support, strict JSON Schema request, and returned-model verification succeeded.
 - Initialize `SimpleKGPipeline` with the local Neo4j driver without exposing
   secrets. **Passed:** live local initialization completed with no secret output.
-- Run the focused MuSiQue fixture through the pipeline.
+- Run the focused MuSiQue fixture through the pipeline. **Passed:** run ID
+  `de0b6bc5-f9c3-4725-a954-d1c9ab4f05e7` completed successfully.
 - Inspect the resulting labels, relationships, lexical graph, entity-resolution
-  behavior, and source-reference properties.
+  behavior, and source-reference properties. **Partial:** labels, relationships,
+  lexical nodes, embeddings, and Document metadata were inspected; rerun
+  duplication behavior remains to be measured.
 - Create and verify any vector indexes required by the selected retrieval path.
 - Record plugin run output and provenance mapping evidence.
 

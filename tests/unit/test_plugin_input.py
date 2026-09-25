@@ -25,11 +25,11 @@ def test_plugin_input_preserves_text_and_provenance() -> None:
         "source_split": "fixture",
         "source_file": "tests/fixtures/musique/valid_records.jsonl",
         "source_sha256": "fixture-sha256",
-        "source_line": 1,
+        "source_line": "1",
         "record_id": "fixture_valid_multi_hop_001",
         "chunk_id": "musique:fixture_valid_multi_hop_001:paragraph:1",
         "document_id": "musique:document:aster-systems-acquisition",
-        "paragraph_idx": 1,
+        "paragraph_idx": "1",
         "title": "Aster Systems Acquisition",
     }
 

@@ -194,6 +194,17 @@ inference remains part of Task 4, when the focused fixture is run.
 
 ### 4. Run the fixture through the plugin
 
+**Result:** The focused fixture was run successfully with
+`src/graphrag_pipeline/extraction/run_fixture.py`. Run ID:
+`de0b6bc5-f9c3-4725-a954-d1c9ab4f05e7`.
+
+The runner does not reset the database automatically, so the generated graph
+remains available in the local `neo4j` database for inspection. The first live
+attempt exposed a GraphRAG 1.21.0 boundary: numeric `source_line` and
+`paragraph_idx` values are rejected by the plugin's metadata validator. The
+plugin input adapter now serializes those two metadata values while retaining
+their numeric types in the validated application request.
+
 - Invoke `SimpleKGPipeline` with the focused MuSiQue paragraph.
 - Capture run ID, fixture ID, model/provider configuration, plugin version,
   start/end timestamps, status, and error information.
@@ -204,8 +215,18 @@ inference remains part of Task 4, when the focused fixture is run.
 
 **Evidence:** one successful graph creation trace or one reproducible plugin
 failure report with the exact blocker.
+The successful run returned a pipeline result and persisted data directly
+through the Neo4j writer.
 
 ### 5. Verify the resulting graph and provenance
+
+The read-only inspection after the successful run found one `Document`, one
+`Chunk`, two `Company` entities, two `FROM_CHUNK` relationships, one
+`FROM_DOCUMENT` relationship, and one `ACQUIRED` relationship. The paragraph
+text and embedding are stored on `Chunk`. Source metadata is stored on the
+`Document`, including `chunk_id`, `record_id`, `paragraph_idx`, source dataset,
+split, file, and source line. The `ACQUIRED` relationship contains
+`since: 2021`.
 
 - Confirm the graph contains the plugin-created entity and relationship data.
 - Identify the actual labels, relationship types, and source-reference
