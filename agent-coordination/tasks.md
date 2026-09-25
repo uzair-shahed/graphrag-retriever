@@ -15,10 +15,10 @@ The current architecture diagram may show only the GraphRAG path while implement
 
 ## Neo4j AI Plugin Architecture Decision
 
-- [ ] Use Neo4j's AI plugin as the default implementation for both GraphRAG and VectorRAG in the local project runtime.
-- [ ] Keep the ingestion, extraction, entity resolution, provenance, and reflection pipeline in local Python/LangGraph; only the retrieval layer is delegated to Neo4j AI plugin capabilities when they satisfy the project requirements.
-- [ ] Preserve custom retrieval, fallback, and experimentation work as stretch-goal tasks under the deferred tasks section at the end of this roadmap.
-- [ ] Document Neo4j plugin version, configuration, feature flags, limitations, and validation checks before relying on plugin responses in evaluation.
+- [x] Use Neo4j's AI plugin as the default implementation for both GraphRAG and VectorRAG in the local project runtime.
+- [x] The retrieval layer is delegated to Neo4j AI plugin capabilities.
+- [x] Document Neo4j plugin version, configuration, feature flags, limitations, and validation checks before relying on plugin responses in evaluation.
+- [x] Treat the plugin-first `SimpleKGPipeline` as the active extraction engine for this project scope, with the archived hand-built extraction models retained only as compatibility/fallback references.
 
 ## Definition Of Done
 
