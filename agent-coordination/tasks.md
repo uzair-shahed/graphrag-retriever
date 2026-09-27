@@ -116,7 +116,7 @@ The capstone is complete when:
 - [ ] Record the deferred decision for Ray workers; the current implementation passes chunks through a linear flow without worker pools.
 - [ ] Define the initial Neo4j labels, relationships, properties, provenance fields, and identifiers needed by ingestion and evaluation.
 - [ ] Record basic local resource requirements for the linear flow; defer detailed capacity planning until benchmarking.
-- [ ] Define the OpenRouter model, token, retry, and concurrency assumptions used by the budget.
+- [x] Define the OpenRouter model, token, retry, and concurrency assumptions used by the budget in [openrouter-cost-estimate.md](openrouter/openrouter-cost-estimate.md); replace planning assumptions with a measured usage ledger before the full paid run.
 - [x] Create a project-specific minimal fixture based on the official MuSiQue schema, including multi-hop evidence, distractors, alternate mentions, malformed input, missing optional fields, and insufficient/unanswerable cases where needed.
 - [x] Define the paragraph-as-chunk contract: initially preserve each MuSiQue paragraph as one chunk with stable IDs, supporting labels, and source provenance; add sub-chunking only if later required by context limits or retrieval quality.
 
@@ -147,7 +147,7 @@ The capstone is complete when:
 - [ ] Documented local development environment.
 - [ ] Verified Neo4j connection scripts.
 - [ ] MuSiQue ingestion and normalization scripts.
-- [ ] OpenRouter cost estimate.
+- [x] OpenRouter cost estimate with measured MuSiQue volume, model pricing snapshot, planning scenarios, and a documented measurement plan.
 - [ ] LangGraph/LLM smoke test.
 
 **Acceptance criteria**
