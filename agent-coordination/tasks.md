@@ -9,7 +9,7 @@
 
 This roadmap converts the weekly milestones in `project-idea-files/milestones.md` into executable tasks, acceptance criteria, evidence requirements, and advisor checkpoints.
 
-`project-idea-files/milestones.md` remains authoritative for schedule, scope, deliverables, and advisor checkpoints. The current implementation will be developed locally with the MuSiQue dataset, local storage, a local Neo4j instance, and a linear processing flow. Docker packaging and deployment are deferred to a stretch goal. `project-idea-files/project-proposal-1.md` supplies architectural detail and motivation; where its phase wording differs, the milestone document controls.
+`project-idea-files/milestones.md` remains authoritative for schedule, scope, deliverables, and advisor checkpoints. The current implementation will be developed locally with the MuSiQue dataset, local storage, a local Neo4j instance, and a linear processing flow. Deferred infrastructure and stretch work is recorded in `agent-coordination/archive/tasks_archive.md`. `project-idea-files/project-proposal-1.md` supplies architectural detail and motivation; where its phase wording differs, the milestone document controls.
 
 The current architecture uses Neo4j's AI plugin for extraction and will use its GraphRAG and VectorRAG capabilities for retrieval. Custom hand-built extraction, retrieval, vector indexing, and plugin-replacement wrappers are archived rather than active core work. The current verified vertical slice is the local MuSiQue paragraph-to-`SimpleKGPipeline`-to-Neo4j graph path with read-only provenance verification.
 
@@ -44,8 +44,6 @@ Still active:
 The capstone is complete when:
 
 - [x] The focused extraction vertical slice runs locally from a documented local development workflow.
-- [ ] Docker Compose packaging and deployment are documented and implemented only as a stretch goal after the core pipeline is complete.
-- [ ] The architecture documents LangGraph, Neo4j, local storage, and a linear processing flow; Ray, Polars, Redis, PostgreSQL, and DuckDB are documented only as deferred stretch options.
 - [ ] MuSiQue official JSONL data can be validated, lightly adapted without changing source text, extracted, resolved, and stored in Neo4j with reproducible scripts; the focused fixture extraction and provenance path are complete, while full ingestion and entity resolution remain open.
 - [ ] LangGraph orchestrates extraction, entity resolution, retrieval, answer generation, and reflection/self-correction.
 - [ ] Users can select Neo4j AI plugin VectorRAG or Neo4j AI plugin GraphRAG retrieval modes, with multi-hop Cypher verification and evidence tracing retained as a required validation path; the interim architecture diagram may show only the GraphRAG path, while Hybrid Search remains an advisor-approved future extension.
@@ -76,7 +74,7 @@ The capstone is complete when:
 - [ ] Reconcile this roadmap with `project-idea-files/project-proposal-1.pdf` and record proposal changes in an issue or decision log.
 - [ ] Confirm research question, hypotheses, baseline definition, and success criteria with the advisor.
 - [ ] Confirm what counts as the Vector RAG baseline and what counts as the graph-enhanced system.
-- [ ] Define the minimum viable core scope and the conditions that permit stretch-goal work.
+- [ ] Define the minimum viable core scope and the conditions that permit deferred work.
 - [ ] Create a weekly review cadence and record advisor decisions, risks, blockers, and metric changes.
 - [ ] Create a milestone evidence directory or artifact convention for logs, reports, charts, and reproducibility metadata.
 
@@ -86,8 +84,6 @@ The capstone is complete when:
 - [ ] Define a minimal repository layout for application code, tests, data manifests, scripts, configuration, evaluation artifacts, and documentation.
 - [ ] Add a minimal environment-variable template for Neo4j, LLM provider, and embedding provider settings.
 - [ ] Define local MuSiQue storage, including stable file paths, checksums, retention, source-split handling, access policy, and provenance metadata.
-- [ ] Record Redis and PostgreSQL as deferred stretch services; do not provision or configure them for the current core implementation.
-- [ ] Record Polars and Ray as deferred stretch technologies; use a linear flow unless a milestone-approved stretch implementation is started.
 - [ ] Keep secrets out of source control and document local secret provisioning.
 - [ ] Establish only the essential formatting and test commands needed during initial development; defer broader CI and pre-commit setup until hardening.
 - [ ] Define experiment IDs, random seeds, run metadata, model versions, prompt versions, and artifact naming.
@@ -113,7 +109,6 @@ The capstone is complete when:
 - [x] Specify service boundaries and data contracts between ingestion, agents, storage, and evaluation.
 - [ ] Finalize the current technology boundary: local Python execution, local MuSiQue storage, a locally running Neo4j instance for graph/vector storage, and a linear ingestion and processing flow.
 - [ ] Define local MuSiQue file paths, checksums, retention behavior, access policy, source-split handling, and provenance links from dataset record to paragraph/chunk, graph entity, and benchmark record.
-- [ ] Record the deferred decision for Ray workers; the current implementation passes chunks through a linear flow without worker pools.
 - [ ] Define the initial Neo4j labels, relationships, properties, provenance fields, and identifiers needed by ingestion and evaluation.
 - [ ] Record basic local resource requirements for the linear flow; defer detailed capacity planning until benchmarking.
 - [x] Define the OpenRouter model, token, retry, and concurrency assumptions used by the budget in [openrouter-cost-estimate.md](openrouter/openrouter-cost-estimate.md); replace planning assumptions with a measured usage ledger before the full paid run.
@@ -140,7 +135,7 @@ The capstone is complete when:
 - [ ] Handle malformed dataset records, missing metadata, duplicate records, and unsupported records explicitly.
 - [ ] Create an OpenRouter cost budget using expected input/output tokens, model pricing, retries, concurrency, and dataset volume; keep the initial fixture path free of paid calls.
 - [ ] Implement a minimal LangGraph loop with one validated LLM call and observable state transitions.
-- [x] Verify that the focused MuSiQue extraction pipeline runs locally without Docker and document the prerequisites needed to reproduce it.
+- [x] Verify that the focused MuSiQue extraction pipeline runs locally and document the prerequisites needed to reproduce it.
 
 **Deliverables**
 
@@ -161,13 +156,6 @@ The capstone is complete when:
 
 - [ ] Review database constraints, connection pooling, resource allocations, dataset provenance, and the initial cost budget.
 
-**Optional stretch work**
-
-- [ ] Package the working local application and Neo4j setup with Docker Compose after the core implementation and evaluation are complete.
-- [ ] Add Polars or Ray processing only if required by an approved stretch goal.
-- [ ] Add DuckDB SQL pipelines for metadata extraction, cleaning, and structural normalization only if required by an approved stretch goal.
-- [ ] Add Redis and PostgreSQL services only if the corresponding Week 11 telemetry stretch goal is approved.
-
 ## Phase 2: LangGraph Multi-Agent Engine And Parallelization
 
 ### Week 5: Plugin extraction and autonomous entity resolution
@@ -177,7 +165,6 @@ The capstone is complete when:
 - [x] Define and validate the plugin input boundary for one MuSiQue paragraph, including text preservation and exclusion of gold labels.
 - [x] Configure and run `SimpleKGPipeline` through the linear local flow, with plugin failures raised rather than reported as success.
 - [ ] Build the LangGraph orchestration around plugin extraction only after retrieval and answer-generation boundaries are defined.
-- [ ] Implement extraction through the linear flow; add Ray-parallelized extraction only if an approved stretch goal requires it.
 - [ ] Build embedding generation and candidate entity retrieval with configurable similarity thresholds and top-K values.
 - [ ] Build the entity-resolution agent that combines vector candidates with contextual LLM reasoning.
 - [ ] Define match, non-match, uncertain, and abstain outcomes.
@@ -332,7 +319,7 @@ The capstone is complete when:
 - [ ] Estimate API token cost for baseline and graph-enhanced configurations and calculate the reduction.
 - [ ] Produce latency distributions, metric tables, confidence/variation summaries, and representative qualitative examples.
 - [ ] Write a limitations section covering model variance, dataset size, hardware, API pricing, and evaluation bias.
-- [ ] Hold the core-results review before starting stretch goals.
+- [ ] Hold the core-results review before starting deferred work.
 
 **Deliverable**
 
@@ -346,108 +333,7 @@ The capstone is complete when:
 
 **Advisor checkpoint**
 
-- [ ] Review core evaluation results and approve or reject transition to stretch goals.
-
-## Phase 4: Stretch Goals, Packaging, And Defense
-
-Stretch work begins only after core functionality, evaluation, and advisor approval are complete. Docker packaging is part of this stretch phase, not a prerequisite for core implementation. If schedule or metrics are at risk, preserve core reproducibility and documentation instead.
-
-### Week 11: Tier 1 stretch goals
-
-- [ ] Define query classes and a labeled routing set for Vector, Cypher, Hybrid, and fallback cases.
-- [ ] Implement the retrieval-routing agent at the query entry point.
-- [ ] Add a deterministic fallback and allow an explicit user override.
-- [ ] Evaluate routing classification accuracy, misroutes, latency overhead, and impact on retrieval metrics.
-- [ ] Define an audit event schema for prompts, state transitions, agent decisions, retrieval settings, evidence, errors, and token usage.
-- [ ] Defer short-lived Redis traces, durable PostgreSQL telemetry, and Polars-based persistence until the Week 11 stretch goal is approved.
-- [ ] If approved, add trace correlation across Redis, PostgreSQL, Neo4j, and benchmark artifacts.
-- [ ] Add access controls and redaction rules for prompts, secrets, and sensitive data.
-
-**Deliverables**
-
-- [ ] Intelligent query-routing layer.
-- [ ] Persistent audit telemetry logging.
-
-**Acceptance criteria**
-
-- [ ] Routing decisions are inspectable and can be overridden.
-- [ ] Telemetry survives the intended service restart and can be queried by run ID.
-- [ ] Logging does not expose secrets and does not materially break latency targets.
-
-**Advisor checkpoint**
-
-- [ ] Assess routing accuracy and confirm PostgreSQL telemetry schema integration.
-
-### Week 12: Tier 2 stretch goals and hardening
-
-- [ ] Implement an asynchronous graph-validation agent for orphan subgraphs, duplicate identifiers, missing provenance, invalid labels, invalid relationships, and schema violations.
-- [ ] Produce validation findings with severity, node/edge IDs, evidence, and remediation status.
-- [ ] Enforce typing across application and evaluation code.
-- [ ] Refactor into modular packages with clear dependency boundaries.
-- [ ] Complete unit, integration, contract, and end-to-end tests for the supported workflow.
-- [ ] Add CI checks for formatting, linting, type checking, tests, security checks, and artifact schema validation.
-- [ ] Add migration/version handling for graph schema and evaluation artifacts.
-- [ ] Make the complete pipeline runnable with `docker-compose up` or the documented single-command equivalent as an approved packaging stretch goal.
-- [ ] Test clean Docker deployment from a fresh environment and verify persistent volumes and initialization if that stretch goal is completed.
-- [ ] Re-run core metrics after hardening to detect regressions.
-
-**Deliverables**
-
-- [ ] Graph validation agent.
-- [ ] Hardened typed and modular codebase.
-- [ ] Complete test suite and CI checks.
-- [ ] Single-command local development workflow; Docker deployment package only if the stretch goal is completed.
-
-**Acceptance criteria**
-
-- [ ] Validation findings are actionable and do not silently mutate production data.
-- [ ] A clean local setup succeeds from documented prerequisites.
-- [ ] Core benchmark results remain comparable after refactoring; Docker comparability is required only if the packaging stretch goal is completed.
-
-**Advisor checkpoint**
-
-- [ ] Perform repository audit, local setup check, and final metric verification; review Docker deployment only if the packaging stretch goal is completed.
-
-### Week 13: Documentation, portfolio, and defense
-
-- [ ] Finalize the capstone report: problem, research question, related work, architecture, methodology, implementation, datasets, experiments, results, limitations, ethics, and future work.
-- [ ] Include enough configuration and protocol detail for independent reproduction.
-- [ ] Prepare a public GitHub repository with a concise README, prerequisites, setup, configuration, data provenance, usage examples, architecture diagrams, tests, and benchmark reproduction scripts.
-- [ ] Separate public code and metadata from secrets, restricted data, and local-only artifacts.
-- [ ] Add a release tag or archive containing the evaluated code and configuration.
-- [ ] Build the defense presentation with motivation, baseline, system design, key implementation decisions, quantitative results, failure cases, and contributions.
-- [ ] Build the required poster and ensure figures match the final report.
-- [ ] Prepare a live or recorded demo using a deterministic fixture and a documented fallback recording.
-- [ ] Prepare answers for limitations, cost, latency, false merges, hallucinations, data provenance, and alternative designs.
-- [ ] Conduct a final advisor rehearsal and incorporate feedback.
-- [ ] Obtain final advisor sign-off and archive the final evidence bundle.
-
-**Deliverables**
-
-- [ ] Final MS Capstone report.
-- [ ] Polished public repository and reproducibility package.
-- [ ] Defense slide deck.
-- [ ] Poster.
-- [ ] Demo script/recording and final evidence archive.
-
-**Acceptance criteria**
-
-- [ ] Report, repository, figures, deck, poster, and demo use consistent final metrics.
-- [ ] The report explains the four evaluation layers: generation reliability, entity-resolution quality, retrieval performance, and operational efficiency.
-- [ ] A clean evaluator can follow the setup and reproduce at least the core smoke test and benchmark commands.
-- [ ] All known limitations and missed targets are disclosed.
-
-**Advisor checkpoint**
-
-- [ ] Complete final presentation evaluation and obtain sign-off.
-
-### Week 14: Contingency and submission buffer
-
-- [ ] Reserve time for advisor-requested corrections, failed reruns, infrastructure outages, and formatting requirements.
-- [ ] Re-run the final smoke test and verify the release archive.
-- [ ] Confirm all required submission portals, filenames, deadlines, and file formats.
-- [ ] Submit the report, deck, poster, repository link, and any required supplementary artifacts.
-- [ ] Archive final logs, benchmark outputs, environment versions, and decision records.
+- [ ] Review core evaluation results and approve or reject transition to deferred work.
 
 ## Traceability Matrix
 
@@ -467,8 +353,6 @@ Stretch work begins only after core functionality, evaluation, and advisor appro
 | 30-50 multi-hop queries | Week 8 | Frozen query set, gold facts, graph paths |
 | RAGAS evaluation | Weeks 9-10 | Pinned harness, raw outputs, metric reports |
 | Latency, throughput, and cost profiling | Week 10 | Benchmark logs, distributions, cost comparison |
-| Retrieval routing and telemetry | Week 11 stretch | Routing labels/results, deferred Redis/PostgreSQL trace queries |
-| Graph validation and hardening | Week 12 stretch | Validation findings, test reports, deployment logs |
 | Report, repository, deck, and poster | Week 13 | Final release and submission archive |
 
 ## Proposal Alignment Matrix
@@ -480,14 +364,12 @@ The proposal adds architectural rationale and implementation detail; it does not
 | Multi-hop retrieval gap | Core motivation and required Vector-versus-Cypher evaluation | Week 6 retrieval tests; Week 10 A/B report |
 | Entity duplication and graph fragmentation | Core entity-resolution, idempotent merge, conflict, and graph-integrity work | Week 5 resolution audit; graph integrity report |
 | Deterministic verification | Core Reflection Agent path checks and unsupported-claim suppression | Week 7 state traces and grounding tests |
-| Linear MuSiQue processing | Current core flow; Polars and Ray are deferred unless stretch work is approved | Ingestion scripts and deterministic processing logs |
+| Linear MuSiQue processing | Current core flow | Ingestion scripts and deterministic processing logs |
 | Neo4j graph and vector-index host | Core storage and retrieval implementation | Schema, indexes, Cypher tests, deployment logs |
-| Redis session state | Deferred Week 11 stretch service; no current setup | Advisor decision log and future telemetry tests |
-| PostgreSQL audit persistence | Deferred Week 11 stretch service; no current setup | Advisor decision log and future telemetry tests |
 | Local MuSiQue storage | Current core storage with provenance and retention | Local manifest, checksums, and ingestion tests |
 | Hybrid Search | Advisor-approved extension; must not replace required Vector RAG or multi-hop Cypher modes | Week 6 contract and optional Week 10 comparison |
 | Four evaluation layers | Report generation reliability, entity resolution, retrieval performance, and operational efficiency separately | Week 9-10 benchmark report |
-| Open-source repository | Week 13 package must expose LangGraph orchestration and Neo4j tools; Docker and Ray task interfaces are deferred unless stretch work is approved | README, setup guide, release archive |
+| Open-source repository | Week 13 package must expose LangGraph orchestration and Neo4j tools | README, setup guide, release archive |
 
 ## Risk Register
 
@@ -501,12 +383,12 @@ The proposal adds architectural rationale and implementation detail; it does not
 | Vector index or Neo4j limitations | Missing index support, slow queries, inconsistent results | Verify versions early, document limits, provide bounded fallback, benchmark actual deployment | Compatibility notes |
 | Resource exhaustion | Worker crashes, memory pressure, slow P95 | Resource limits, bounded concurrency, profiling, smaller fixtures, backpressure | Load-test report |
 | Reflection loops | Retry budget exhausted frequently | Explicit termination, grounding thresholds, trace analysis, fallback response | State-transition metrics |
-| Schedule compression | Core metrics or report slip | Gate stretch goals, weekly checkpoints, preserve reproducibility and documentation | Decision log |
+| Schedule compression | Core metrics or report slip | Gate deferred work, weekly checkpoints, preserve reproducibility and documentation | Decision log |
 
 ## Final Evidence Checklist
 
 - [ ] Source and environment versions are recorded.
-- [ ] Local environment startup and clean-run logs are archived; Docker logs are archived only if the packaging stretch goal is completed.
+- [ ] Local environment startup and clean-run logs are archived.
 - [ ] Dataset manifests, checksums, annotation guidelines, and frozen artifacts are archived.
 - [ ] Schema, prompt, threshold, and model configurations are versioned.
 - [ ] Raw predictions and per-query benchmark outputs are preserved.
@@ -515,43 +397,3 @@ The proposal adds architectural rationale and implementation detail; it does not
 - [ ] Tests and CI results are archived.
 - [ ] Final report, README, architecture diagrams, deck, poster, and demo are mutually consistent.
 - [ ] Advisor feedback and final sign-off are recorded.
-
-## Deferred Tasks (Stretch Goals)
-
-These items were intentionally moved from the core roadmap because they are either custom implementations that Neo4j AI plugin replaces or advanced capabilities that should only be attempted after the core ingestion, extraction, resolution, plugin-based retrieval, and grounded-answer path are working.
-
-### Active plugin retrieval and future extensions
-
-- [ ] Configure and validate Neo4j AI plugin VectorRAG retrieval.
-- [ ] Configure and validate Neo4j AI plugin GraphRAG retrieval.
-- [ ] Preserve bounded multi-hop Cypher verification and source-evidence tracing for grounded-answer validation.
-- [ ] Evaluate plugin VectorRAG and GraphRAG using the same frozen query suite and answer contract.
-- [ ] Add retrieval routing only after both required plugin modes have been validated.
-- [ ] Implement Hybrid Search only as an advisor-approved extension that does not replace either required plugin mode.
-
-Custom extraction and retrieval replacements are preserved in
-`agent-coordination/archive/tasks_archive.md` and are not active core tasks.
-
-### Deferred platform and scaling work
-
-- [ ] Add Ray-based parallelization for ingestion, extraction, or evaluation if a milestone-approved stretch implementation requires it.
-- [ ] Add Polars or DuckDB pipelines for heavy metadata normalization, cleaning, and benchmark data preparation if approved as stretch work.
-- [ ] Add Redis-backed session or trace state for ephemeral agent telemetry if the project later expands to a multi-user or multi-run environment.
-- [ ] Add PostgreSQL-backed durable telemetry, audit logging, and historical run tracking if the telemetry stretch goal is approved.
-- [ ] Package the working local application and Neo4j environment with Docker Compose after the core workflow, evaluation, and plugin integration are complete.
-
-### Deferred validation and hardening tasks
-
-- [ ] Implement an asynchronous graph-validation agent for orphan subgraphs, duplicate identifiers, missing provenance, invalid labels, and schema violations as a stretch hardening layer.
-- [ ] Produce validation findings with severity, node and edge IDs, evidence, and remediation status.
-- [ ] Add more advanced CI, security scans, and artifact schema validation once the local plugin-based workflow is stable.
-- [ ] Add additional benchmark suites that compare plugin and custom retrieval implementations under equal conditions.
-
-### Deferred research and extension work
-
-- [ ] Explore automatic retrieval routing, query-classification heuristics, and model-aware retrieval orchestration for future extension.
-- [ ] Compare plugin GraphRAG and VectorRAG with ad hoc graph-exploration and keyword retrieval baselines under the final evaluation protocol.
-- [ ] Extend the evaluation suite to include failure-mode analysis, plugin-specific latency breakdowns, and tuning trade-offs.
-- [ ] Document plugin limitations, unsupported features, and edge cases discovered in local benchmarking.
-
-These deferred items remain valuable, but they are explicitly not required to satisfy the current capstone core implementation once the Neo4j AI plugin is accepted as the primary GraphRAG and VectorRAG mechanism.
