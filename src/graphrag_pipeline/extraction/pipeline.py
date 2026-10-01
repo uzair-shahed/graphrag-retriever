@@ -53,7 +53,7 @@ def build_simple_kg_pipeline(
     client_kwargs = {"api_key": settings.api_key, "base_url": settings.base_url}
     llm = OpenAILLM(
         model_name=settings.llm_model,
-        model_params={"temperature": 0},
+        model_params={"temperature": 0, "max_tokens": settings.llm_max_tokens},
         base_url=settings.base_url,
         api_key=settings.api_key,
     )

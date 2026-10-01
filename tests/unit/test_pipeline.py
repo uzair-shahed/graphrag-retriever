@@ -21,6 +21,7 @@ def openrouter_environment() -> dict[str, str]:
         "OPENROUTER_API_KEY": "test-key",
         "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
         "OPENROUTER_LLM_MODEL": "openai/gpt-4o-mini",
+        "OPENROUTER_LLM_MAX_TOKENS": "4096",
         "OPENROUTER_EMBEDDING_MODEL": "openai/text-embedding-3-small",
         "OPENROUTER_EMBEDDING_DIMENSIONS": "1536",
         "OPENROUTER_REQUIRE_PARAMETERS": "true",
@@ -34,6 +35,7 @@ def test_openrouter_settings_parse_without_exposing_secret() -> None:
         settings = OpenRouterSettings.from_env()
 
     assert settings.llm_model == "openai/gpt-4o-mini"
+    assert settings.llm_max_tokens == 4096
     assert settings.embedding_model == "openai/text-embedding-3-small"
     assert settings.embedding_dimensions == 1536
     assert settings.api_key == "test-key"
@@ -52,6 +54,7 @@ def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
         llm_model="openai/gpt-4o-mini",
         embedding_model="openai/text-embedding-3-small",
         embedding_dimensions=1536,
+        llm_max_tokens=2048,
         require_parameters=True,
         allow_fallbacks=True,
     )

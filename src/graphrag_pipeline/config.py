@@ -37,6 +37,19 @@ def _get_bool_env(name: str, default: bool) -> bool:
     raise ValueError(f"Environment variable {name} must be a boolean, got {raw_value!r}")
 
 
+def _get_positive_int_env(name: str, default: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError(f"Environment variable {name} must be an integer, got {raw_value!r}") from error
+    if value <= 0:
+        raise ValueError(f"Environment variable {name} must be a positive integer.")
+    return value
+
+
 @dataclass(frozen=True)
 class Neo4jSettings:
     """Bounded connection and transaction settings for the local Neo4j instance."""
@@ -82,6 +95,7 @@ class OpenRouterSettings:
     llm_model: str
     embedding_model: str
     embedding_dimensions: int
+    llm_max_tokens: int
     require_parameters: bool
     allow_fallbacks: bool
 
@@ -113,6 +127,7 @@ class OpenRouterSettings:
             llm_model=llm_model,
             embedding_model=embedding_model,
             embedding_dimensions=embedding_dimensions,
+            llm_max_tokens=_get_positive_int_env("OPENROUTER_LLM_MAX_TOKENS", 4096),
             require_parameters=_get_bool_env("OPENROUTER_REQUIRE_PARAMETERS", True),
             allow_fallbacks=_get_bool_env("OPENROUTER_ALLOW_FALLBACKS", True),
         )
