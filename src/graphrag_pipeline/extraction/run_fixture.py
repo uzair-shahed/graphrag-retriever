@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from graphrag_pipeline.config import Neo4jSettings, OpenRouterSettings
+from graphrag_pipeline.config import Neo4jSettings, model_settings_from_env
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
@@ -32,11 +32,11 @@ async def run_fixture(path: Path) -> dict[str, Any]:
     request = load_fixture(path)
     text, document_metadata = build_plugin_input(request)
     neo4j_settings = Neo4jSettings.from_env()
-    openrouter_settings = OpenRouterSettings.from_env()
+    model_settings = model_settings_from_env()
     connection = Neo4jConnection(neo4j_settings)
     try:
         pipeline = build_simple_kg_pipeline(
-            connection.connect(), openrouter_settings
+            connection.connect(), model_settings
         )
         result = await pipeline.run_async(
             text=text,
@@ -49,9 +49,9 @@ async def run_fixture(path: Path) -> dict[str, Any]:
             "chunk_id": request.chunk_id,
             "record_id": request.record_id,
             "database": neo4j_settings.database,
-            "llm_model": openrouter_settings.llm_model,
-            "embedding_model": openrouter_settings.embedding_model,
-            "embedding_dimensions": openrouter_settings.embedding_dimensions,
+            "provider": type(model_settings).__name__.removesuffix("Settings").lower(),
+            "llm_model": model_settings.llm_model,
+            "embedding_model": model_settings.embedding_model,
             "result_type": type(result.result).__name__,
         }
     finally:

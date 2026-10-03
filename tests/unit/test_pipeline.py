@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from neo4j import GraphDatabase
 
-from graphrag_pipeline.config import OpenRouterSettings
+from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 
 
@@ -74,6 +74,45 @@ def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
         ):
             pipeline = build_simple_kg_pipeline(driver=driver, settings=settings)
 
+        assert pipeline.runner.config.from_file is False
+        assert pipeline.runner.config.on_error.value == "RAISE"
+        assert pipeline.runner.config.perform_entity_resolution is False
+        assert pipeline.runner.config.neo4j_database == "neo4j"
+    finally:
+        driver.close()
+
+
+def test_pipeline_factory_builds_ollama_components() -> None:
+    """Verify Ollama settings create native GraphRAG Ollama components offline."""
+    settings = OllamaSettings(
+        host="http://localhost:11434",
+        llm_model="qwen3:4b",
+        embedding_model="nomic-embed-text",
+    )
+
+    driver = GraphDatabase.driver("bolt://127.0.0.1:7687", auth=("test", "test"))
+    try:
+        with patch.object(
+            driver,
+            "execute_query",
+            MagicMock(
+                return_value=(
+                    [{"versions": ["2026.08.1"], "edition": "enterprise"}],
+                    None,
+                    None,
+                )
+            ),
+        ):
+            pipeline = build_simple_kg_pipeline(driver=driver, settings=settings)
+
+        llm = pipeline.runner.config.llm_config["default"].root
+        embedder = pipeline.runner.config.embedder_config["default"].root
+        assert type(llm).__name__ == "OllamaLLM"
+        assert llm.model_name == "qwen3:4b"
+        assert llm.model_params["options"]["temperature"] == 0
+        assert type(embedder).__name__ == "OllamaEmbeddings"
+        assert embedder.model == "nomic-embed-text"
+        assert embedder.client._client.base_url == "http://localhost:11434"
         assert pipeline.runner.config.from_file is False
         assert pipeline.runner.config.on_error.value == "RAISE"
         assert pipeline.runner.config.perform_entity_resolution is False

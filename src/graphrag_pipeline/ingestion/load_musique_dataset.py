@@ -28,7 +28,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from graphrag_pipeline.config import Neo4jSettings, OpenRouterSettings
+from graphrag_pipeline.config import Neo4jSettings, model_settings_from_env
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
@@ -148,7 +148,7 @@ def collect_requests(
 async def run_requests(
     requests: list[ExtractionRequest],
     neo4j_settings: Neo4jSettings,
-    openrouter_settings: OpenRouterSettings,
+    openrouter_settings: object,
     show_progress: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Send every validated chunk request through the live pipeline in order.
@@ -267,11 +267,11 @@ async def load_dataset(
         return summary
 
     neo4j_settings = Neo4jSettings.from_env()
-    openrouter_settings = OpenRouterSettings.from_env()
+    model_settings = model_settings_from_env()
 
     run_started_at = time.perf_counter()
     succeeded, failed = await run_requests(
-        requests, neo4j_settings, openrouter_settings, show_progress=show_progress
+        requests, neo4j_settings, model_settings, show_progress=show_progress
     )
     summary.run_seconds = measure_duration_seconds(run_started_at)
 

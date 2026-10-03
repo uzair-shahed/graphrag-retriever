@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from graphrag_pipeline.config import Neo4jSettings
+from graphrag_pipeline.config import Neo4jSettings, OllamaSettings, model_settings_from_env
 
 
 def test_from_env_reads_required_and_default_values(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,3 +59,42 @@ def test_from_env_rejects_non_numeric_timeout(monkeypatch: pytest.MonkeyPatch) -
 
     with pytest.raises(ValueError):
         Neo4jSettings.from_env()
+
+
+def test_model_settings_from_env_reads_ollama_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Ollama provider supplies the expected local model defaults."""
+    monkeypatch.setenv("GRAPH_RAG_PROVIDER", "ollama")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("OLLAMA_LLM_MODEL", raising=False)
+    monkeypatch.delenv("OLLAMA_EMBEDDING_MODEL", raising=False)
+
+    settings = model_settings_from_env()
+
+    assert isinstance(settings, OllamaSettings)
+    assert settings.host == "http://localhost:11434"
+    assert settings.llm_model == "qwen3:4b"
+    assert settings.embedding_model == "nomic-embed-text"
+
+
+def test_model_settings_from_env_reads_ollama_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Ollama host and model names can be configured through the environment."""
+    monkeypatch.setenv("GRAPH_RAG_PROVIDER", "OLLAMA")
+    monkeypatch.setenv("OLLAMA_HOST", "http://ollama.example:11434/")
+    monkeypatch.setenv("OLLAMA_LLM_MODEL", "qwen3:8b")
+    monkeypatch.setenv("OLLAMA_EMBEDDING_MODEL", "custom-embedder")
+
+    settings = model_settings_from_env()
+
+    assert settings == OllamaSettings(
+        host="http://ollama.example:11434",
+        llm_model="qwen3:8b",
+        embedding_model="custom-embedder",
+    )
+
+
+def test_model_settings_from_env_rejects_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unsupported provider values fail before a pipeline is constructed."""
+    monkeypatch.setenv("GRAPH_RAG_PROVIDER", "unknown")
+
+    with pytest.raises(ValueError, match="GRAPH_RAG_PROVIDER"):
+        model_settings_from_env()

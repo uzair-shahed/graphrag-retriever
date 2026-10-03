@@ -131,3 +131,43 @@ class OpenRouterSettings:
             require_parameters=_get_bool_env("OPENROUTER_REQUIRE_PARAMETERS", True),
             allow_fallbacks=_get_bool_env("OPENROUTER_ALLOW_FALLBACKS", True),
         )
+
+
+@dataclass(frozen=True)
+class OllamaSettings:
+    """Local Ollama settings for the GraphRAG LLM and embedding providers."""
+
+    host: str
+    llm_model: str
+    embedding_model: str
+
+    @classmethod
+    def from_env(cls) -> "OllamaSettings":
+        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        llm_model = os.environ.get("OLLAMA_LLM_MODEL", "qwen3:4b")
+        embedding_model = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+        if not host or not llm_model or not embedding_model:
+            raise ValueError(
+                "OLLAMA_HOST, OLLAMA_LLM_MODEL, and OLLAMA_EMBEDDING_MODEL "
+                "must not be empty."
+            )
+        return cls(host=host, llm_model=llm_model, embedding_model=embedding_model)
+
+
+def model_settings_from_env() -> OpenRouterSettings | OllamaSettings:
+    """Load model settings selected by ``GRAPH_RAG_PROVIDER``.
+
+    Returns:
+        OpenRouter or Ollama settings according to the provider switch.
+
+    Raises:
+        ValueError: If the provider name is unsupported or its settings are invalid.
+    """
+    provider = os.environ.get("GRAPH_RAG_PROVIDER", "openrouter").strip().lower()
+    if provider == "openrouter":
+        return OpenRouterSettings.from_env()
+    if provider == "ollama":
+        return OllamaSettings.from_env()
+    raise ValueError(
+        f"GRAPH_RAG_PROVIDER must be 'openrouter' or 'ollama', got {provider!r}."
+    )
