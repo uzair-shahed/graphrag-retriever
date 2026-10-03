@@ -74,6 +74,12 @@ def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
         ):
             pipeline = build_simple_kg_pipeline(driver=driver, settings=settings)
 
+        llm = pipeline.runner.config.llm_config["default"].root
+        assert llm.model_name == "openai/gpt-4o-mini"
+        assert llm.model_params["extra_body"]["provider"] == {
+            "require_parameters": True,
+            "allow_fallbacks": True,
+        }
         assert pipeline.runner.config.from_file is False
         assert pipeline.runner.config.on_error.value == "RAISE"
         assert pipeline.runner.config.perform_entity_resolution is False
