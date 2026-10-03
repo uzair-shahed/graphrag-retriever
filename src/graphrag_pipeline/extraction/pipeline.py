@@ -53,7 +53,8 @@ def build_simple_kg_pipeline(
         llm = OpenAILLM(
             model_name=settings.llm_model,
             model_params={
-                "temperature": 0,
+                # "temperature": 0, # -- Must be disabled for some providers which do not support temperature
+                "reasoning_effort": "none", # -- This can be toggled depending on provider
                 "max_tokens": settings.llm_max_tokens,
                 "extra_body": {
                     "provider": {

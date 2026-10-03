@@ -29,6 +29,7 @@ from typing import Any
 from tqdm import tqdm
 
 from graphrag_pipeline.config import Neo4jSettings, model_settings_from_env
+from graphrag_pipeline.diagnostics import exception_diagnostics
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
@@ -197,8 +198,7 @@ async def run_requests(
                         {
                             "chunk_id": request.chunk_id,
                             "record_id": request.record_id,
-                            "error_type": type(error).__name__,
-                            "error": str(error),
+                            **exception_diagnostics(error),
                         }
                     )
                 else:

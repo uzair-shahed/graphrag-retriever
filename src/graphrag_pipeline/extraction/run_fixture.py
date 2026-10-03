@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from graphrag_pipeline.config import Neo4jSettings, model_settings_from_env
+from graphrag_pipeline.diagnostics import exception_diagnostics
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
@@ -68,7 +69,13 @@ def main() -> None:
         help="Path to one validated extraction chunk JSON file.",
     )
     args = parser.parse_args()
-    summary = asyncio.run(run_fixture(args.fixture))
+    try:
+        summary = asyncio.run(run_fixture(args.fixture))
+    except Exception as error:  # noqa: BLE001 - CLI reports the complete cause chain
+        print(
+            json.dumps(exception_diagnostics(error), indent=2, sort_keys=True),
+        )
+        raise SystemExit(1) from error
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 
