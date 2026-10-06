@@ -116,6 +116,18 @@ def test_query_response_requires_evidence_for_successful_shape() -> None:
     assert response.citations == ["chunk-1"]
 
 
+def test_query_response_rejects_success_without_citations() -> None:
+    """A successful response cannot bypass the grounded-answer citation rule."""
+    with pytest.raises(ValueError, match="require citations"):
+        QueryResponse(
+            status="succeeded",
+            trace_id="trace-1",
+            question="Question",
+            answer="Answer",
+            retrieval_mode="vector",
+        )
+
+
 def test_query_response_preserves_request_provenance() -> None:
     """A response can retain the selected record and preload mode."""
     response = QueryResponse(

@@ -51,3 +51,19 @@ the configured `top_k` to Neo4j, bounds the returned context, and preserves
 chunk and source provenance in `EvidenceChunk` values. Empty results remain
 explicitly empty; provider failures and malformed records raise
 `RetrievalError` rather than becoming successful answers.
+
+### Grounded answer boundary
+
+The answer-generation boundary is in `src/graphrag_pipeline/answer.py`. It
+accepts the exact `QueryRequest` question and bounded `RetrievalResult`, then
+invokes the configured OpenRouter or Ollama `neo4j-graphrag` LLM wrapper. The
+prompt contains only the question and returned evidence, with each chunk's
+`chunk_id` exposed as a citation candidate; MuSiQue gold answers, supporting
+fact labels, and decomposition fields are never sent to the provider.
+
+The provider must return JSON with exactly `answer` and `citations` fields.
+Citations must refer to returned evidence chunk IDs. Empty retrieval produces
+`insufficient_evidence` without an LLM call. Provider exceptions, malformed
+JSON, empty answers, missing citations, and citations for unknown chunks
+produce `failed`; a `succeeded` `QueryResponse` always has a non-empty answer
+and citations while preserving request and evidence provenance.

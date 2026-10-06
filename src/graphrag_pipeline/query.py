@@ -26,7 +26,16 @@ from inspect import isawaitable
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    model_validator,
+)
 
 from graphrag_pipeline.ingestion.record_adapter import RawMusiqueRecord
 
@@ -121,6 +130,16 @@ class QueryResponse(BaseModel):
     citations: list[StrictStr] = Field(default_factory=list)
     latency_seconds: StrictFloat | None = Field(default=None, ge=0)
     error: StrictStr | None = None
+
+    @model_validator(mode="after")
+    def validate_success_contract(self) -> "QueryResponse":
+        """Require an answer and citations whenever a response succeeds."""
+        if self.status == "succeeded":
+            if not self.answer or not self.answer.strip():
+                raise ValueError("successful responses require a non-empty answer")
+            if not self.citations:
+                raise ValueError("successful responses require citations")
+        return self
 
 
 def _source_split(path: Path) -> str:
