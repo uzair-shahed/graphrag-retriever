@@ -24,7 +24,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tqdm import tqdm
 
@@ -43,6 +43,9 @@ from graphrag_pipeline.ingestion.record_adapter import (
     iter_jsonl_lines,
 )
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
+
+if TYPE_CHECKING:
+    from graphrag_pipeline.query import QueryRequest
 
 DEFAULT_DATASET_PATH = Path("dataset/musique/data/data/musique_full_v1.0_dev.jsonl")
 
@@ -80,6 +83,43 @@ class LoadSummary:
             "chunks_failed": len(self.chunks_failed),
             "dead_lettered_records": self.dead_lettered_records,
             "failed_chunks": self.chunks_failed,
+            "collect_seconds": round(self.collect_seconds, 3),
+            "run_seconds": round(self.run_seconds, 3),
+            "elapsed_seconds": round(self.elapsed_seconds, 3),
+            "elapsed": format_duration(self.elapsed_seconds),
+        }
+
+
+@dataclass
+class PreloadSummary:
+    """Outcome of preloading the records selected for a query run."""
+
+    requested_records: list[dict[str, Any]]
+    records_read: int = 0
+    dead_lettered_records: list[dict[str, Any]] = field(default_factory=list)
+    chunks_planned: int = 0
+    chunks_succeeded: list[dict[str, Any]] = field(default_factory=list)
+    chunks_failed: list[dict[str, Any]] = field(default_factory=list)
+    records_succeeded: int = 0
+    collect_seconds: float = 0.0
+    run_seconds: float = 0.0
+    elapsed_seconds: float = 0.0
+
+    @property
+    def succeeded(self) -> bool:
+        """Return whether every selected record was loaded successfully."""
+        return not self.dead_lettered_records and not self.chunks_failed
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return an audit-friendly representation of the preload outcome."""
+        return {
+            "requested_records": self.requested_records,
+            "records_read": self.records_read,
+            "records_loaded": self.records_succeeded,
+            "chunks_planned": self.chunks_planned,
+            "chunks_succeeded": len(self.chunks_succeeded),
+            "chunks_failed": self.chunks_failed,
+            "dead_lettered_records": self.dead_lettered_records,
             "collect_seconds": round(self.collect_seconds, 3),
             "run_seconds": round(self.run_seconds, 3),
             "elapsed_seconds": round(self.elapsed_seconds, 3),
@@ -147,6 +187,81 @@ def collect_requests(
         requests.extend(record_requests)
 
     return requests, dead_letters, records_read
+
+
+def collect_selected_requests(
+    selected_requests: list[QueryRequest],
+) -> tuple[list[ExtractionRequest], list[dict[str, Any]], int]:
+    """Adapt exactly the JSONL records represented by validated query requests.
+
+    Args:
+        selected_requests: MuSiQue requests retaining source file and line.
+
+    Returns:
+        Chunk requests, dead-letter summaries, and the number of records read.
+
+    Raises:
+        ValueError: If a MuSiQue request does not include source provenance.
+    """
+    requests: list[ExtractionRequest] = []
+    dead_letters: list[dict[str, Any]] = []
+    checksums: dict[Path, str] = {}
+
+    for selected in selected_requests:
+        if selected.origin != "musique" or not selected.source_file or selected.source_line is None:
+            raise ValueError("preload requires MuSiQue source_file and source_line provenance")
+
+        path = Path(selected.source_file)
+        if path not in checksums:
+            checksums[path] = compute_file_sha256(path)
+
+        raw_line: str | None = None
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, candidate in enumerate(handle, start=1):
+                if line_number == selected.source_line:
+                    raw_line = candidate.strip()
+                    break
+
+        if raw_line is None or not raw_line:
+            dead_letters.append(
+                {
+                    "record_id": selected.record_id,
+                    "source_line": selected.source_line,
+                    "reason": "selected source line is unavailable",
+                }
+            )
+            continue
+
+        try:
+            record_requests = build_requests_for_record(
+                raw_line=raw_line,
+                source_line=selected.source_line,
+                source_file=str(path),
+                source_sha256=checksums[path],
+                source_split=selected.source_split or derive_source_split(path),
+            )
+        except RecordAdapterError as error:
+            dead_letters.append(
+                {
+                    "record_id": selected.record_id,
+                    "source_line": selected.source_line,
+                    "reason": error.reason,
+                }
+            )
+            continue
+
+        if not record_requests or record_requests[0].record_id != selected.record_id:
+            dead_letters.append(
+                {
+                    "record_id": selected.record_id,
+                    "source_line": selected.source_line,
+                    "reason": "selected source record ID does not match the query request",
+                }
+            )
+            continue
+        requests.extend(record_requests)
+
+    return requests, dead_letters, len(selected_requests)
 
 
 async def run_requests(
@@ -286,6 +401,69 @@ async def load_dataset(
     )
     summary.run_seconds = measure_duration_seconds(run_started_at)
 
+    summary.chunks_succeeded = succeeded
+    summary.chunks_failed = failed
+    summary.records_succeeded = count_fully_succeeded_records(requests, failed)
+    summary.elapsed_seconds = measure_duration_seconds(started_at)
+    return summary
+
+
+async def load_selected_records(
+    selected_requests: list[QueryRequest],
+    *,
+    dry_run: bool = False,
+    show_progress: bool = True,
+    neo4j_settings: Neo4jSettings | None = None,
+    openrouter_settings: object | None = None,
+) -> PreloadSummary:
+    """Preload selected MuSiQue records through the existing ingestion path.
+
+    Args:
+        selected_requests: Validated MuSiQue query requests to preload.
+        dry_run: Plan and validate chunks without connecting to providers.
+        show_progress: Whether live loading reports chunk progress.
+        neo4j_settings: Optional injected Neo4j settings for tests or callers.
+        openrouter_settings: Optional injected model settings for tests or callers.
+
+    Returns:
+        A summary containing selected-record metadata, timings, dead letters,
+        and chunk-level loader outcomes.
+    """
+    started_at = time.perf_counter()
+    requested_records = [
+        {
+            "record_id": request.record_id,
+            "source_file": request.source_file,
+            "source_line": request.source_line,
+            "trace_id": request.trace_id,
+        }
+        for request in selected_requests
+    ]
+    collect_started_at = time.perf_counter()
+    requests, dead_letters, records_read = collect_selected_requests(selected_requests)
+    collect_seconds = measure_duration_seconds(collect_started_at)
+    summary = PreloadSummary(
+        requested_records=requested_records,
+        records_read=records_read,
+        dead_lettered_records=dead_letters,
+        chunks_planned=len(requests),
+        collect_seconds=collect_seconds,
+    )
+
+    if dry_run or not requests:
+        summary.elapsed_seconds = measure_duration_seconds(started_at)
+        return summary
+
+    resolved_neo4j_settings = neo4j_settings or Neo4jSettings.from_env()
+    resolved_model_settings = openrouter_settings or model_settings_from_env()
+    run_started_at = time.perf_counter()
+    succeeded, failed = await run_requests(
+        requests,
+        resolved_neo4j_settings,
+        resolved_model_settings,
+        show_progress=show_progress,
+    )
+    summary.run_seconds = measure_duration_seconds(run_started_at)
     summary.chunks_succeeded = succeeded
     summary.chunks_failed = failed
     summary.records_succeeded = count_fully_succeeded_records(requests, failed)

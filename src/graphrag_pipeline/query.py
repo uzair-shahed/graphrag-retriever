@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Awaitable, Callable
+from inspect import isawaitable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -250,3 +252,57 @@ def custom_query(question: str, *, trace_id: str | None = None) -> QueryRequest:
         trace_id=trace_id or str(uuid.uuid4()),
         origin="custom",
     )
+
+
+async def run_query_batch(
+    requests: list[QueryRequest],
+    answer_query: Callable[[QueryRequest], QueryResponse | Awaitable[QueryResponse]],
+    *,
+    preload_loader: Callable[..., Awaitable[Any]] | None = None,
+    show_progress: bool = False,
+) -> list[QueryResponse]:
+    """Run QA requests with explicit, per-record optional preloading.
+
+    Args:
+        requests: Validated query requests in deterministic execution order.
+        answer_query: Retrieval/answer callback invoked only after preload.
+        preload_loader: Injectable selected-record loader used when requested.
+        show_progress: Whether the shared ingestion path displays progress.
+
+    Returns:
+        One query response per request, including explicit preload failures.
+
+    Raises:
+        QuerySelectionError: If a custom question requests record preloading.
+    """
+    if preload_loader is None:
+        from graphrag_pipeline.ingestion.load_musique_dataset import load_selected_records
+
+        preload_loader = load_selected_records
+
+    responses: list[QueryResponse] = []
+    for request in requests:
+        if request.preload:
+            if request.origin != "musique" or not request.record_id:
+                raise QuerySelectionError("preload requires a MuSiQue record-backed query")
+            summary = await preload_loader([request], show_progress=show_progress)
+            if not summary.succeeded:
+                responses.append(
+                    QueryResponse(
+                        status="failed",
+                        trace_id=request.trace_id,
+                        question=request.question,
+                        origin=request.origin,
+                        record_id=request.record_id,
+                        source_file=request.source_file,
+                        source_line=request.source_line,
+                        preload=True,
+                        retrieval_mode="unavailable",
+                        error=json.dumps(summary.to_dict(), sort_keys=True),
+                    )
+                )
+                continue
+
+        result = answer_query(request)
+        responses.append(await result if isawaitable(result) else result)
+    return responses
