@@ -67,3 +67,19 @@ Citations must refer to returned evidence chunk IDs. Empty retrieval produces
 JSON, empty answers, missing citations, and citations for unknown chunks
 produce `failed`; a `succeeded` `QueryResponse` always has a non-empty answer
 and citations while preserving request and evidence provenance.
+
+### MuSiQue correctness verification
+
+The MuSiQue-specific checks are in `src/graphrag_pipeline/musique_verification.py`.
+They run after retrieval and answer generation and keep evaluation labels out
+of all model-visible inputs. For each returned chunk, the verifier compares the
+adapter-generated paragraph index and retrieved text with the selected record's
+paragraphs. For labeled records it separately reports whether every supporting
+paragraph was retrieved; this is an evaluation signal, not a generation hint.
+
+When a read-only Neo4j connection is supplied, the verifier also checks each
+returned `Chunk` ID, record ID, and text against the graph and retains its
+source metadata as a graph trace. Missing or mismatched chunks are reported as
+incomplete rather than accepted as graph-backed evidence. `write_run_artifact`
+stores the original request, retrieval evidence, answer/citations, correctness
+report, configuration, timings, and redacted errors as deterministic JSON.
