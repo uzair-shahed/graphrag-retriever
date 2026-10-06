@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -72,3 +74,30 @@ def exception_diagnostics(error: BaseException) -> dict[str, Any]:
         "error": _redact(str(error)),
         "exception_chain": chain,
     }
+
+
+def has_validation_error(error: BaseException) -> bool:
+    """Return whether an exception chain contains a Pydantic validation error."""
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if type(current).__name__ == "ValidationError":
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def save_invalid_llm_response(
+    error: BaseException,
+    response: str | None,
+    directory: Path = Path("debugging_logs"),
+) -> Path | None:
+    """Save a raw LLM response when GraphRAG failed Pydantic validation."""
+    if not has_validation_error(error) or response is None:
+        return None
+    directory.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    path = directory / f"invalid_llm_response_{timestamp}.txt"
+    path.write_text(response, encoding="utf-8")
+    return path

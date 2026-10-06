@@ -8,9 +8,11 @@ without opening a connection or calling OpenRouter.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pydantic import BaseModel
 from graphrag_pipeline.extraction.schemas import ExtractionRequest, Provenance
 from graphrag_pipeline.ingestion.load_musique_dataset import (
     count_fully_succeeded_records,
@@ -75,6 +77,46 @@ def test_run_requests_counts_records_with_a_failing_chunk_as_not_succeeded(
 
     records_loaded = count_fully_succeeded_records(requests, failed)
     assert records_loaded == 1
+
+
+@patch("graphrag_pipeline.ingestion.load_musique_dataset.save_invalid_llm_response")
+@patch("graphrag_pipeline.ingestion.load_musique_dataset.build_simple_kg_pipeline")
+@patch("graphrag_pipeline.ingestion.load_musique_dataset.Neo4jConnection")
+def test_run_requests_records_invalid_response_path(
+    mock_connection_cls: MagicMock,
+    mock_build_pipeline: MagicMock,
+    mock_save_response: MagicMock,
+) -> None:
+    """A validation failure records the saved raw-response path for its chunk."""
+    mock_connection = MagicMock()
+    mock_connection.connect.return_value = MagicMock()
+    mock_connection_cls.return_value = mock_connection
+
+    class ExpectedGraph(BaseModel):
+        nodes: list[dict]
+
+    try:
+        ExpectedGraph.model_validate_json('{"nodes": "invalid"}')
+    except Exception as validation_error:
+        pipeline = MagicMock()
+        pipeline.run_async = AsyncMock(side_effect=validation_error)
+        pipeline.runner.config.llm_config = {
+            "default": SimpleNamespace(root=SimpleNamespace(last_response='{"nodes": "invalid"}'))
+        }
+        mock_build_pipeline.return_value = pipeline
+        mock_save_response.return_value = Path("debugging_logs/invalid_llm_response.txt")
+
+        _, failed = asyncio.run(
+            run_requests(
+                [make_request("record-1", 0)],
+                neo4j_settings=MagicMock(),
+                openrouter_settings=MagicMock(),
+                show_progress=False,
+            )
+        )
+
+    assert failed[0]["invalid_llm_response"] == "debugging_logs/invalid_llm_response.txt"
+    mock_save_response.assert_called_once()
 
 
 def test_count_fully_succeeded_records_with_no_failures() -> None:

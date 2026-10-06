@@ -29,7 +29,10 @@ from typing import Any
 from tqdm import tqdm
 
 from graphrag_pipeline.config import Neo4jSettings, model_settings_from_env
-from graphrag_pipeline.diagnostics import exception_diagnostics
+from graphrag_pipeline.diagnostics import (
+    exception_diagnostics,
+    save_invalid_llm_response,
+)
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
@@ -189,18 +192,26 @@ async def run_requests(
                     current_record_failed = False
 
                 text, document_metadata = build_plugin_input(request)
+                pipeline = None
                 try:
                     pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
                     result = await pipeline.run_async(text=text, document_metadata=document_metadata)
                 except Exception as error:  # noqa: BLE001 - recorded, not swallowed
                     current_record_failed = True
-                    failed.append(
-                        {
-                            "chunk_id": request.chunk_id,
-                            "record_id": request.record_id,
-                            **exception_diagnostics(error),
-                        }
-                    )
+                    failure = {
+                        "chunk_id": request.chunk_id,
+                        "record_id": request.record_id,
+                        **exception_diagnostics(error),
+                    }
+                    if pipeline is not None:
+                        llm = pipeline.runner.config.llm_config["default"].root
+                        response_path = save_invalid_llm_response(
+                            error,
+                            getattr(llm, "last_response", None),
+                        )
+                        if response_path is not None:
+                            failure["invalid_llm_response"] = str(response_path)
+                    failed.append(failure)
                 else:
                     succeeded.append(
                         {

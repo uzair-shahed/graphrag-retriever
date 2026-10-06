@@ -19,6 +19,7 @@ from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.llm import OpenAILLM
 
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings, model_settings_from_env
+from graphrag_pipeline.extraction.debug_llm import DebuggableOpenAILLM
 
 
 def build_simple_kg_pipeline(
@@ -50,7 +51,7 @@ def build_simple_kg_pipeline(
     settings = settings or model_settings_from_env()
     if isinstance(settings, OpenRouterSettings):
         client_kwargs = {"api_key": settings.api_key, "base_url": settings.base_url}
-        llm = OpenAILLM(
+        llm = DebuggableOpenAILLM(
             model_name=settings.llm_model,
             model_params={
                 # "temperature": 0, # -- Must be disabled for some providers which do not support temperature

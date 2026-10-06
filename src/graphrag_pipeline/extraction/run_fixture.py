@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from graphrag_pipeline.config import Neo4jSettings, model_settings_from_env
-from graphrag_pipeline.diagnostics import exception_diagnostics
+from graphrag_pipeline.diagnostics import (
+    exception_diagnostics,
+    save_invalid_llm_response,
+)
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
@@ -39,10 +42,20 @@ async def run_fixture(path: Path) -> dict[str, Any]:
         pipeline = build_simple_kg_pipeline(
             connection.connect(), model_settings
         )
-        result = await pipeline.run_async(
-            text=text,
-            document_metadata=document_metadata,
-        )
+        try:
+            result = await pipeline.run_async(
+                text=text,
+                document_metadata=document_metadata,
+            )
+        except Exception as error:  # noqa: BLE001 - preserve GraphRAG failures
+            llm = pipeline.runner.config.llm_config["default"].root
+            response_path = save_invalid_llm_response(
+                error,
+                getattr(llm, "last_response", None),
+            )
+            if response_path is not None:
+                print(json.dumps({"invalid_llm_response": str(response_path)}))
+            raise
         return {
             "status": "succeeded",
             "run_id": result.run_id,
