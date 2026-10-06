@@ -50,6 +50,27 @@ def _get_positive_int_env(name: str, default: int) -> int:
     return value
 
 
+def _get_nonnegative_int_env(name: str, default: int) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None or raw_value.strip() == "":
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError(f"Environment variable {name} must be an integer, got {raw_value!r}") from error
+    if value < 0:
+        raise ValueError(f"Environment variable {name} must be non-negative.")
+    return value
+
+
+def _get_chunk_settings() -> tuple[int, int]:
+    chunk_size = _get_positive_int_env("GRAPH_RAG_CHUNK_SIZE", 10000)
+    chunk_overlap = _get_nonnegative_int_env("GRAPH_RAG_CHUNK_OVERLAP", 0)
+    if chunk_overlap >= chunk_size:
+        raise ValueError("GRAPH_RAG_CHUNK_OVERLAP must be less than GRAPH_RAG_CHUNK_SIZE.")
+    return chunk_size, chunk_overlap
+
+
 @dataclass(frozen=True)
 class Neo4jSettings:
     """Bounded connection and transaction settings for the local Neo4j instance."""
@@ -98,6 +119,8 @@ class OpenRouterSettings:
     llm_max_tokens: int
     require_parameters: bool
     allow_fallbacks: bool
+    chunk_size: int = 10000
+    chunk_overlap: int = 0
 
     @classmethod
     def from_env(cls) -> "OpenRouterSettings":
@@ -120,6 +143,7 @@ class OpenRouterSettings:
             ) from error
         if embedding_dimensions <= 0:
             raise ValueError("OPENROUTER_EMBEDDING_DIMENSIONS must be a positive integer.")
+        chunk_size, chunk_overlap = _get_chunk_settings()
 
         return cls(
             api_key=api_key,
@@ -130,6 +154,8 @@ class OpenRouterSettings:
             llm_max_tokens=_get_positive_int_env("OPENROUTER_LLM_MAX_TOKENS", 4096),
             require_parameters=_get_bool_env("OPENROUTER_REQUIRE_PARAMETERS", True),
             allow_fallbacks=_get_bool_env("OPENROUTER_ALLOW_FALLBACKS", True),
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
 
 
@@ -140,6 +166,8 @@ class OllamaSettings:
     host: str
     llm_model: str
     embedding_model: str
+    chunk_size: int = 10000
+    chunk_overlap: int = 0
 
     @classmethod
     def from_env(cls) -> "OllamaSettings":
@@ -151,7 +179,14 @@ class OllamaSettings:
                 "OLLAMA_HOST, OLLAMA_LLM_MODEL, and OLLAMA_EMBEDDING_MODEL "
                 "must not be empty."
             )
-        return cls(host=host, llm_model=llm_model, embedding_model=embedding_model)
+        chunk_size, chunk_overlap = _get_chunk_settings()
+        return cls(
+            host=host,
+            llm_model=llm_model,
+            embedding_model=embedding_model,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
 
 
 def model_settings_from_env() -> OpenRouterSettings | OllamaSettings:

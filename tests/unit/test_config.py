@@ -74,6 +74,8 @@ def test_model_settings_from_env_reads_ollama_defaults(monkeypatch: pytest.Monke
     assert settings.host == "http://localhost:11434"
     assert settings.llm_model == "qwen3:4b"
     assert settings.embedding_model == "nomic-embed-text"
+    assert settings.chunk_size == 10000
+    assert settings.chunk_overlap == 0
 
 
 def test_model_settings_from_env_reads_ollama_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,6 +92,29 @@ def test_model_settings_from_env_reads_ollama_overrides(monkeypatch: pytest.Monk
         llm_model="qwen3:8b",
         embedding_model="custom-embedder",
     )
+
+
+def test_model_settings_from_env_reads_chunk_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared GraphRAG splitter settings can be overridden through the environment."""
+    monkeypatch.setenv("GRAPH_RAG_PROVIDER", "ollama")
+    monkeypatch.setenv("GRAPH_RAG_CHUNK_SIZE", "12000")
+    monkeypatch.setenv("GRAPH_RAG_CHUNK_OVERLAP", "250")
+
+    settings = model_settings_from_env()
+
+    assert isinstance(settings, OllamaSettings)
+    assert settings.chunk_size == 12000
+    assert settings.chunk_overlap == 250
+
+
+def test_model_settings_from_env_rejects_invalid_chunk_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chunk overlap must be smaller than chunk size."""
+    monkeypatch.setenv("GRAPH_RAG_PROVIDER", "ollama")
+    monkeypatch.setenv("GRAPH_RAG_CHUNK_SIZE", "1000")
+    monkeypatch.setenv("GRAPH_RAG_CHUNK_OVERLAP", "1000")
+
+    with pytest.raises(ValueError, match="GRAPH_RAG_CHUNK_OVERLAP"):
+        model_settings_from_env()
 
 
 def test_model_settings_from_env_rejects_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:

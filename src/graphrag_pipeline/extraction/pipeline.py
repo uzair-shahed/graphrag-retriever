@@ -79,7 +79,10 @@ def build_simple_kg_pipeline(
         schema = "FREE"
     if isinstance(settings, OpenRouterSettings):
         schema = None
-    text_splitter = FixedSizeSplitter(chunk_size=10000, chunk_overlap=0)
+    text_splitter = FixedSizeSplitter(
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
+    )
     return SimpleKGPipeline(
         llm=llm,
         driver=driver,
