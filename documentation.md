@@ -83,3 +83,39 @@ source metadata as a graph trace. Missing or mismatched chunks are reported as
 incomplete rather than accepted as graph-backed evidence. `write_run_artifact`
 stores the original request, retrieval evidence, answer/citations, correctness
 report, configuration, timings, and redacted errors as deterministic JSON.
+
+### Minimal query command
+
+The minimal end-to-end command is implemented in
+`src/graphrag_pipeline/query_command.py`. It can be run from the repository
+root as either `python -m graphrag_pipeline.query_command` or, after installing
+the project, `graphrag-query`.
+
+A custom question is explicitly external and receives no MuSiQue provenance:
+
+```text
+graphrag-query --question "Who acquired Northwind Labs?" --artifact runs/custom.json
+```
+
+For MuSiQue questions, configure `GRAPH_RAG_DATASET_PATHS` in `.env`, or pass
+one or more `--dataset-path` values, then select a stable record ID:
+
+```text
+graphrag-query --record-id fixture_valid_multi_hop_001 --artifact runs/record.json
+```
+
+Without `--record-id`, the command processes all configured records up to
+`--max-records`. It preserves each stored question unchanged and writes
+numbered artifacts for a batch. `--preload` is off by default; when supplied,
+the command delegates to the existing bounded ingestion path before querying
+each selected MuSiQue record. Without it, no ingestion or re-extraction is
+performed.
+
+Retrieval is bounded with `--retrieval-mode vector|vector_cypher`, `--top-k`,
+and `--max-context-chunks`. The command verifies Neo4j retrieval prerequisites
+before execution, then uses the existing retriever, answer boundary, MuSiQue
+correctness verifier, and artifact writer. A missing graph, provider failure,
+malformed answer, or missing citation produces a nonzero exit status and does
+not become a successful answer. Required environment settings are documented
+in `.env.example`; the command requires a reachable Neo4j database and a
+verified vector index.

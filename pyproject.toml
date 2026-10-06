@@ -16,6 +16,9 @@ dev = [
     "pytest>=8.0,<9",
 ]
 
+[project.scripts]
+graphrag-query = "graphrag_pipeline.query_command:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
