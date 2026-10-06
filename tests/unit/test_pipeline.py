@@ -84,6 +84,9 @@ def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
         assert pipeline.runner.config.on_error.value == "RAISE"
         assert pipeline.runner.config.perform_entity_resolution is False
         assert pipeline.runner.config.neo4j_database == "neo4j"
+        splitter = pipeline.runner.config.text_splitter.root
+        assert splitter.chunk_size == 10000
+        assert splitter.chunk_overlap == 0
     finally:
         driver.close()
 

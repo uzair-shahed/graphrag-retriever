@@ -12,6 +12,7 @@ while model and embedding API calls begin only when extraction runs.
 from __future__ import annotations
 
 from neo4j import Driver
+from neo4j_graphrag.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
 from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
@@ -78,11 +79,13 @@ def build_simple_kg_pipeline(
         schema = "FREE"
     if isinstance(settings, OpenRouterSettings):
         schema = None
+    text_splitter = FixedSizeSplitter(chunk_size=10000, chunk_overlap=0)
     return SimpleKGPipeline(
         llm=llm,
         driver=driver,
         embedder=embedder,
         schema=schema,
+        text_splitter=text_splitter,
         from_file=False,
         on_error="RAISE",
         perform_entity_resolution=False,
