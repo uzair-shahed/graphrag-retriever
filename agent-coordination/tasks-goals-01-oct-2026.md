@@ -8,7 +8,7 @@
 
 Define the minimum implementation tasks required to add question answering to
 the now-verified Neo4j extraction path. The immediate aim is deliberately
-small: send one question to a preloaded Neo4j graph, retrieve graph-backed
+small: optionally preload selected data into Neo4j, retrieve graph-backed
 evidence, and return either a grounded answer or an explicit insufficient-
 evidence result with inspectable provenance.
 
@@ -33,7 +33,8 @@ retrievers, but the repository does not yet configure or verify the retrieval
 index, query harness, answer contract, or answer-generation run. Those are the
 remaining implementation items. The first answer demonstration must not be
 described as complete until the returned evidence is proven to come from the
-preloaded graph.
+graph. Preloading is controlled explicitly by `--preload` and must never happen
+implicitly.
 
 ## Goal
 
@@ -42,25 +43,28 @@ Implement and verify one minimal local query flow:
 ```text
 question (custom or selected from MuSiQue JSONL)
   -> validated query request
-  -> Neo4j GraphRAG retrieval from an already-loaded graph
+  -> optional record preload through SimpleKGPipeline
+  -> Neo4j GraphRAG retrieval from the available graph
   -> answer generation using returned graph evidence
   -> answer or insufficient-evidence result with sources and trace
 ```
 
 The first demonstrator may use either a custom question or the exact
-`question` field from one selected record in
-`dataset/musique/data/data/musique_ans_v1.0_dev.jsonl`. The query command must
-accept a particular MuSiQue record ID, locate that record in the JSONL file,
-and route its unchanged `question` value to the question-answering system.
-The dataset file or files used for record selection must be configurable
-through the `.env` file, for example with `GRAPH_RAG_DATASET_PATHS`, including
-paths such as `musique_ans_v1.0_dev.jsonl`. When no specific record ID is provided, the
-system must select all records from one or more configured dataset files and
-process them as a bounded batch. The configured file list and selection mode
-must be retained in the run metadata.
-The selected record is expected to have already been loaded into Neo4j; query
-execution must validate graph availability but must not silently ingest or
-re-extract the record. The record's supporting-fact labels remain
+`question` field from one selected record in a configured MuSiQue JSONL file.
+The query command must accept a particular MuSiQue record ID, locate that
+record in the configured JSONL files, and route its unchanged `question` value
+to the question-answering system. The dataset file or files used for record
+selection must be configured through the `.env` file, for example with
+`GRAPH_RAG_DATASET_PATHS`; there is no fixed or implicit dataset filename.
+When no specific record ID is provided, the system must select all records from
+one or more configured dataset files and process them as a bounded batch. The
+configured file list and selection mode must be retained in the run metadata.
+The query command must support an explicit `--preload` flag. When the flag is
+active, each selected MuSiQue record must be loaded through the existing
+bounded ingestion path and `SimpleKGPipeline` before its question is sent to
+the QA system. When the flag is absent, the command must only query the
+available graph and must not invoke ingestion or re-extraction. In either mode,
+graph availability and evidence provenance must be validated. The record's supporting-fact labels remain
 evaluation-only and must not be sent to retrieval or answer generation as
 model-visible input.
 
@@ -122,7 +126,9 @@ smallest compatibility adapter needed to preserve the Neo4j-managed design.
 
 The first successful demonstration needs only:
 
-- one question supplied directly or selected from one preloaded MuSiQue record;
+- one custom question or one question selected from a configured MuSiQue file;
+- an explicit `--preload` mode that loads selected MuSiQue records before QA,
+  plus a default query-only mode for available graph data;
 - a validated query request retaining question origin and a trace ID;
 - a Neo4j GraphRAG retrieval call returning graph-backed evidence from the
   existing database;
@@ -134,8 +140,9 @@ The first successful demonstration needs only:
   labeled record;
 - offline unit tests plus one documented local integration run.
 
-Ingestion remains a prerequisite command and may be run beforehand. It is not
-part of every query invocation.
+The existing ingestion command remains available as a separate prerequisite.
+Query execution may also perform the same bounded preload when `--preload` is
+active; with the flag off, ingestion is not part of the query invocation.
 
 Full-dataset ingestion, autonomous entity-resolution research, Hybrid Search,
 large-scale benchmarking, LangGraph reflection cycles, and production
@@ -148,7 +155,7 @@ parallelism are outside the minimum path until this vertical slice works.
 - Define a query request containing `record_id`, `question`, `source_split`,
   `source_file`, and a run/trace ID.
 - Accept a specific `record_id` as the primary MuSiQue selection input and
-  read that record from `dataset/musique/data/data/musique_ans_v1.0_dev.jsonl`.
+  read that record from the configured JSONL file or files.
 - Allow the dataset source path or paths to be supplied through `.env`, with
   support for one or more JSONL files. The configured files are the source of
   truth for record selection; the command must not silently substitute a
@@ -159,8 +166,9 @@ parallelism are outside the minimum path until this vertical slice works.
 - Preserve the exact `question` text, record ID, paragraph indices, titles,
   and source line from the selected JSONL record.
 - Reject empty or missing questions rather than silently substituting a query.
-- Keep the source split explicit as `ans_dev` for this labeled answer-bearing
-  file; do not treat test records as if they had gold answers.
+- Preserve the source split derived from the configured source file; do not
+  substitute a fixed split or treat records as labeled when their configured
+  source does not provide gold answers.
 - Define a query response containing the answer, retrieval mode, evidence
   chunks, citations, graph references, status, latency, and error details.
 - Ensure the query request and response retain the relationship between the
@@ -175,28 +183,37 @@ GraphRAG/provider boundaries to test record-ID selection, configured dataset
 paths, no-selector batch selection, empty or duplicate inputs, and exact
 question preservation without network or paid-model calls.
 
-### 2. Reuse the existing ingestion path as a prerequisite
+### 2. Reuse the existing ingestion path for optional preloading
 
 - Treat the existing MuSiQue record adapter and paragraph-as-chunk contract as
   the input boundary for graph loading; do not create a second adapter for QA.
-- Use the existing bounded loader to ingest every paragraph belonging to a
-  selected record before querying it.
+- Add an explicit `--preload` query flag, defaulting to off, that invokes the
+  existing bounded loader and `SimpleKGPipeline` for every selected record
+  before that record's question is sent to QA.
+- When `--preload` is absent, do not invoke the loader or
+  `SimpleKGPipeline`; query only the graph that is already available.
+- Record the preload flag, selected records, loader outcomes, and timing in
+  run metadata. A preload failure must prevent that record's question from
+  being sent to the QA system and must produce an explicit failure outcome.
 - Preserve `record_id`, `chunk_id`, `document_id`, paragraph index, title,
   source file, checksum, source line, and original paragraph text.
 - Keep `is_supporting`, answers, decomposition labels, and other gold fields
   outside the plugin-visible extraction input.
 - Keep loading bounded and repeatable, with dead-letter reporting for malformed
   records and explicit failure for plugin/provider errors.
-- Verify or document the reset/idempotency behavior needed before a clean QA
-  demonstration; query execution itself must never silently re-ingest data.
+- Verify or document the reset/idempotency behavior needed for repeated
+  `--preload` runs. Query execution must never ingest implicitly when the flag
+  is off.
 
 **Existing evidence:** ingestion tests, dry-run planning, and live chunk-level
-failure reporting are present. Remaining QA evidence is a preloaded record
-whose `Document`/`Chunk` provenance passes the read-only verifier.
+failure reporting are present. Remaining QA evidence must cover both a
+preloaded record whose `Document`/`Chunk` provenance passes the read-only
+verifier and a query-only run that does not invoke ingestion.
 
 **Testing requirement:** Keep ingestion and provenance tests deterministic and
-verify that the query path consumes preloaded graph data without invoking the
-ingestion path again.
+verify both `--preload` behavior and default query-only behavior. Tests must
+prove that the flag controls whether the loader and `SimpleKGPipeline` are
+invoked, and that a preload failure prevents QA execution.
 
 ### 3. Verify the Neo4j GenAI graph and retrieval prerequisites
 
@@ -293,21 +310,23 @@ re-running paid calls.
 ### 7. Create the minimal query command and documentation
 
 - Add one documented command that sends a custom question or a selected
-  MuSiQue question to an already-loaded graph and runs retrieval through answer
-  generation.
+  MuSiQue question through retrieval and answer generation. The command must
+  expose `--preload`; with the flag on it preloads selected MuSiQue records
+  first, and with the flag off it only queries the available graph.
 - Support `--record-id` (or an equivalent explicit record-ID option) for
-  targeted MuSiQue selection and use `musique_ans_v1.0_dev.jsonl` as the
-  example/default source file.
+  targeted MuSiQue selection from the configured source files. No default
+  dataset file may be substituted when the configuration is absent.
 - Route the selected record's `question` field unchanged to the QA system and
   include the selected record ID in the result provenance.
-- Read the dataset file or files from `.env` configuration, such as
-  `GRAPH_RAG_DATASET_PATHS`. Support one or more configured JSONL paths,
-  including `musique_ans_v1.0_dev.jsonl`.
+- Read one or more dataset file paths from `.env` configuration, such as
+  `GRAPH_RAG_DATASET_PATHS`. The configured paths are the complete source of
+  truth for selection.
 - When no record ID is provided, select all records from the configured files
   and execute them as a bounded batch rather than inventing a question or
   silently choosing one record.
-- Keep ingestion as a separately documented prerequisite command; do not make
-  the query command reload or re-extract a record automatically.
+- Keep ingestion as a separately documented prerequisite command, while also
+  allowing the query command to invoke that same path only when `--preload` is
+  explicitly supplied. Never reload or re-extract implicitly.
 - Reuse the existing Neo4j/model settings conventions and avoid requiring the
   original AllenNLP environment.
 - Add flags for custom question, dataset path, record ID, retrieval mode,
@@ -317,14 +336,17 @@ re-running paid calls.
 - Make the command print a concise structured result and write a full run
   artifact for audit.
 - Document prerequisites, Neo4j startup, environment variables, index setup,
-  expected provider cost, and the exact record/question used in the demo.
+  `--preload` behavior, expected provider cost, and the exact
+  record/question used in the demo. State clearly that the flag is off by
+  default.
 - Include a clear note that a MuSiQue demo question originates from the
-  selected record in `musique_ans_v1.0_dev.jsonl`, not from a hand-authored
+  selected record in a configured JSONL source, not from a hand-authored
   benchmark query.
 
-**Evidence:** a clean local query run from the repository root against a
-preloaded graph, command output, run artifact, and updated project
-documentation. Keep the ingestion log as a separate prerequisite artifact.
+**Evidence:** clean local query runs from the repository root covering both a
+query-only run against an available graph and a `--preload` run, with command
+output, run artifacts, and updated project documentation. Keep loader output
+and preload outcomes in the run artifact when preloading is enabled.
 
 **Testing requirement:** Add a deterministic command-level test for custom
  questions, record-ID questions, configured dataset files, no-selector batch
@@ -332,10 +354,10 @@ documentation. Keep the ingestion log as a separate prerequisite artifact.
 
 ### 8. Create a separate GraphRAG retrieval-test program
 
-The project must also provide a retrieval-only Python program for testing the
-GraphRAG system after selected MuSiQue records have already been ingested into
-Neo4j. This program must not assume that it needs to reload or re-extract the
-records before answering a question.
+The project must also provide a retrieval-test Python program for testing the
+GraphRAG system against the available Neo4j graph. It must expose the same
+explicit `--preload` flag: when active it loads selected MuSiQue records before
+answering; when inactive it must not reload or re-extract records.
 
 - Add a separate command/module for query testing that connects to the
   existing Neo4j graph and invokes the same Neo4j GenAI GraphRAG retrieval and
@@ -343,11 +365,10 @@ records before answering a question.
 - Support a custom question supplied directly through the command line or an
   equivalent input option. A custom question must be clearly marked as
   externally supplied and must not be assigned a false MuSiQue record ID.
-- Support selecting one or more MuSiQue records from the local
-  `musique_ans_v1.0_dev.jsonl` file by record ID and optionally 1-based record
-  position, then use each selected record's stored `question` field as the
-  query. Record ID selection is the required path for targeting a known
-  preloaded graph record.
+- Support selecting one or more MuSiQue records from the configured JSONL
+  files by record ID and optionally 1-based record position, then use each
+  selected record's stored `question` field as the query. Record ID selection
+  is the required path for targeting a known preloaded graph record.
 - Read one or more dataset file paths from `.env`, and use those configured
   files when resolving record IDs or positions. If no record selector is
   supplied, select all records from all configured files as a bounded batch.
@@ -356,27 +377,30 @@ records before answering a question.
 - Allow multiple selected record questions to be executed as a bounded batch,
   with one result per question and a summary of successes, insufficient
   evidence responses, and failures.
-- Assume that the selected records' graphs are already loaded in Neo4j. The
-  program may verify that the relevant `Document`/`Chunk` provenance exists,
-  but it must not silently ingest missing records. Missing graph data should
-  produce an explicit validation error or a clearly marked unavailable result.
+- When `--preload` is active, load each selected record through the existing
+  bounded ingestion path before querying it. When the flag is inactive,
+  verify that the relevant `Document`/`Chunk` provenance exists without
+  ingesting missing records; missing graph data must produce an explicit
+  validation error or a clearly marked unavailable result.
 - Preserve question origin metadata in every result: custom question, or
   MuSiQue dataset, source split, source file, record ID, and source line when
   available.
 - Reuse the validated query, retrieval, answer, citation, timing, and error
   contracts from the main path rather than creating a second incompatible
   response format.
-- Add flags for custom question, record ID, record position/range, retrieval
-  mode, top-K, output artifact path, and progress display as appropriate.
+- Add flags for custom question, record ID, record position/range, `--preload`,
+  retrieval mode, top-K, output artifact path, and progress display as
+  appropriate. Record whether preloading was requested in every result.
 - Keep Neo4j GenAI GraphRAG as the retrieval implementation. The test program
   is a query harness, not a local vector search or a replacement retrieval
   implementation.
 - Add offline tests covering custom-question selection, MuSiQue-question
-  selection, multiple-record execution, missing preloaded graph data, empty
-  retrieval, and preservation of question/provenance metadata.
-- Document that this program is intended for repeated retrieval experiments
-  against preloaded graphs and does not measure ingestion time unless the
-  caller separately records that process.
+  selection, multiple-record execution, optional preloading, missing graph
+  data in query-only mode, empty retrieval, and preservation of
+  question/provenance metadata.
+- Document that this program supports repeated query-only experiments against
+  available graphs and optional preloading experiments. When `--preload` is
+  active, record ingestion time separately from retrieval and answer time.
 
 **Evidence:** a separate retrieval-test command, mocked tests for both input
 selection paths, one custom-question run, one run using questions from at
@@ -392,15 +416,17 @@ query.
 
 This goal is complete when all of the following are true:
 
-- A user can preload a bounded record with the existing ingestion command and
-  then run one documented query command against the local Neo4j instance.
+- A user can run one documented query command in query-only mode against an
+  available local Neo4j graph or pass `--preload` to load selected records
+  through `SimpleKGPipeline` before querying them.
 - The query command accepts a custom question or submits a selected MuSiQue
   record's own `question` field unchanged.
 - Dataset file selection is configurable through `.env`; with no specific
   record selector, the command can process all records from one or more
   configured JSONL files as a bounded batch.
-- The preloading step converts the record's paragraphs into validated chunks
-  and processes them by Neo4j GenAI `SimpleKGPipeline`.
+- When `--preload` is active, the preloading step converts each selected
+  record's paragraphs into validated chunks and processes them by Neo4j GenAI
+  `SimpleKGPipeline`; when it is inactive, no preloading occurs.
 - Neo4j's GenAI GraphRAG retrieves evidence from the resulting graph using the
   configured retrieval path.
 - The system produces an answer or an explicit insufficient-evidence result.
@@ -416,9 +442,9 @@ This goal is complete when all of the following are true:
   behavior, and a composed end-to-end test verifies that the implemented
   features work together and preserve question, evidence, provenance,
   citations, status, and trace metadata.
-- A separate retrieval-test program can query graphs that were loaded earlier
-  without re-running ingestion, using either a custom question or questions
-  selected from MuSiQue records.
+- A separate retrieval-test program supports both query-only execution against
+  graphs loaded earlier and explicit `--preload` execution, using either a
+  custom question or questions selected from MuSiQue records.
 - The implementation uses Neo4j GenAI capabilities maximally for extraction,
   indexing, GraphRAG retrieval, and answer generation, with local Python code
   limited to validation, orchestration, provenance, and verification.

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -61,6 +62,24 @@ def _get_nonnegative_int_env(name: str, default: int) -> int:
     if value < 0:
         raise ValueError(f"Environment variable {name} must be non-negative.")
     return value
+
+
+def dataset_paths_from_env() -> list[Path]:
+    """Read the configured comma-separated MuSiQue JSONL paths.
+
+    Returns:
+        Dataset paths in the order configured by ``GRAPH_RAG_DATASET_PATHS``.
+
+    Raises:
+        ValueError: If the setting is missing or contains an empty path.
+    """
+    raw_value = os.environ.get("GRAPH_RAG_DATASET_PATHS", "")
+    paths = [Path(item.strip()) for item in raw_value.split(",") if item.strip()]
+    if not paths:
+        raise ValueError(
+            "GRAPH_RAG_DATASET_PATHS must contain one or more comma-separated JSONL paths."
+        )
+    return paths
 
 
 def _get_chunk_settings() -> tuple[int, int]:
