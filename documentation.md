@@ -40,3 +40,14 @@ The installed 1.21.0 API uses `VectorRetriever(driver, index_name, ...)` and
 verification command does not create or mutate indexes; it fails instead when
 the configured index is absent, not online, aimed at a different property,
 or configured with incompatible dimensions or similarity.
+
+### GraphRAG retrieval adapter
+
+The application retrieval boundary is in
+`src/graphrag_pipeline/retrieval.py`. After prerequisite verification, build a
+retriever with `build_retriever()` and submit a validated `QueryRequest` to
+`retrieve()`. The adapter supports `vector` and `vector_cypher` modes, passes
+the configured `top_k` to Neo4j, bounds the returned context, and preserves
+chunk and source provenance in `EvidenceChunk` values. Empty results remain
+explicitly empty; provider failures and malformed records raise
+`RetrievalError` rather than becoming successful answers.
