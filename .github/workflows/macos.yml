@@ -1,0 +1,18 @@
+name: macOS
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv python install
+      - run: uv sync --locked --extra dev
+      - run: uv run --locked python -m pytest tests/unit -v
+      - run: uv run --locked graphrag-query --help

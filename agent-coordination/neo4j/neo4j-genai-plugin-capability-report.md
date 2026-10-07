@@ -1,6 +1,6 @@
 # Neo4j GenAI Plugin Capability Report
 
-**Last modified:** 23 September 2026
+**Last modified:** 7 October 2026
 
 **Purpose of this file:**
 Record the verified local Neo4j server, Neo4j GraphRAG Python package, and
@@ -13,19 +13,19 @@ dependency. The local Neo4j configuration and smoke test provide the connection
 behavior used by this report.
 
 **Caveats:**
-This report verifies connectivity and API availability only. It does not prove
-that `SimpleKGPipeline` has successfully extracted the MuSiQue fixture, that the
-selected LLM or embedding provider is configured, that provenance is preserved,
-or that the generated graph satisfies Contracts 1-4. The Knowledge Graph
-Builder feature is documented by Neo4j as experimental, so its API and behavior
-may change.
+This report records successful local connectivity, API, provider, and focused
+fixture checks, but does not guarantee that the workflow has been reproduced on
+a fresh machine. The Knowledge Graph Builder feature is documented by Neo4j as
+experimental, so its API and behavior may change. This is a historical
+capability record, not the current clone runbook; use the root
+[README](../../README.md) for portable `uv` commands.
 
 ## Verification Date And Environment
 
 | Item | Verified value |
 |---|---|
-| Operating system | macOS |
-| Python interpreter | `.venv/bin/python` |
+| Operating system | macOS 15, Apple Silicon |
+| Python interpreter | `uv`-managed project environment |
 | Python version | 3.14.3 |
 | Neo4j Python driver | 5.28.6 |
 | Neo4j server edition | Enterprise |

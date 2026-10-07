@@ -258,10 +258,10 @@ the active path. Do not mix server-generated and OpenRouter-generated vectors.
 ## Verification Commands
 
 ```bash
-source .venv/bin/activate
-python -m pip check
-python -m pytest tests -q
-python -m pytest tests/integration/test_neo4j_connection_smoke.py -v -rs
+uv sync --locked --extra dev
+uv run --locked python -m pip check
+uv run --locked python -m pytest tests -q
+uv run --locked python -m pytest tests/integration/test_neo4j_connection_smoke.py -v -rs
 ```
 
 The agent should also query the current model catalog without exposing the API

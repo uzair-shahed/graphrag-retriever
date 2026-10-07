@@ -1,6 +1,6 @@
 # Neo4j GenAI Compatibility Notes
 
-**Last modified:** 23 September 2026
+**Last modified:** 7 October 2026
 
 **Purpose of this file:**
 Record compatibility, installation, provider, and local-server facts that affect
@@ -11,16 +11,16 @@ Neo4j GenAI extraction and retrieval implementation.
 work should use this file before changing dependencies or Neo4j indexes.
 
 **Caveats:**
-This file records the local verification performed on 23 September 2026. It is
-not a promise that future package releases or server upgrades retain the same
-API. Provider credentials, model selection, and package extras remain project
-decisions rather than checked-in values.
+The server/package compatibility values were locally verified on 23 September
+2026. The macOS clone workflow was updated on 7 October 2026, but has not yet
+been exercised on a second machine or an Intel Mac. Future package releases or
+server upgrades may change the API. Provider credentials remain local values.
 
 ## Local Compatibility Baseline
 
 | Item | Verified value |
 |---|---|
-| OS | macOS |
+| OS | macOS 15, Apple Silicon |
 | Python | 3.14.3 |
 | Neo4j server | Enterprise 2026.08.1 |
 | Neo4j Python driver | 5.28.6 |
@@ -45,8 +45,9 @@ pip install neo4j-graphrag
 Provider extras are separate. Official documentation lists extras for OpenAI,
 Vertex AI, Anthropic, Mistral, Cohere, Ollama, sentence-transformers, and
 experimental KG Builder functionality. Select only the provider used by the
-project. The local project currently declares the base package, not a provider
-extra.
+project. The project declares the OpenAI-compatible and Ollama provider extras
+in `pyproject.toml`; use the locked project environment rather than installing
+a second, unpinned copy of `neo4j-graphrag` by hand.
 
 The package documentation states that its `nlp` extra (spaCy) is not supported
 on Python 3.14 because of an upstream issue. Avoid the spaCy resolver on this
@@ -104,15 +105,13 @@ Neo4j 2026.08 also documents the `vector-2026.08` provider and binary
 quantization defaults. Do not tune quantization or HNSW settings before a
 baseline measurement; record any non-default values in the benchmark metadata.
 
-## Open Verification Items
+## Reproduction Status
 
-- Choose the LLM provider and install only its package extra.
-- Choose the embedding provider and model/dimension.
-- Run `SimpleKGPipeline` on the focused MuSiQue fixture.
-- Verify the plugin's document/chunk metadata propagation.
-- Create the project vector index only after the embedding dimension is known.
-- Run one VectorRetriever query and one graph-aware retrieval query.
-- Capture plugin and retriever errors as reproducible artifacts.
+The recorded macOS setup verified the provider-backed focused fixture and local
+Neo4j connection. A fresh machine must still create its own database, configure
+credentials, run the fixture, and create the vector index; see the root
+[README](../../README.md) for those steps. The project prerequisite command
+checks the existing index but deliberately does not create or mutate it.
 
 ## Official Sources
 

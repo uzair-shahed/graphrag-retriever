@@ -16,9 +16,9 @@ This section is the working boundary for the core implementation. It is intentio
 
 ### Runtime
 
-- Execution is through one local Python virtual environment on macOS. The current environment uses `/Users/uzair/Documents/capstone-project/repo/project-repo/.venv/bin/python` and Python 3.14.3.
-- The supported Python version must be confirmed by installing and smoke-testing the selected LangGraph, Neo4j driver, Pydantic, and provider dependencies. Until that compatibility check is recorded in a lockfile, Python 3.14.3 is the observed baseline, not a portability guarantee.
-- The project must add a committed dependency manifest and lockfile before calling the runtime reproducible. Core dependencies are the LangGraph runtime, Neo4j Python driver, Pydantic validation, test tooling, and provider clients only when the corresponding integration is enabled.
+- The macOS setup uses `uv`, `.python-version`, and the committed `uv.lock`; invoke commands with `uv run --locked` rather than an absolute virtual-environment path. Python 3.14.3 is the current verified baseline, not a guarantee for every macOS release or architecture.
+- Recheck the lock and tests when upgrading dependencies or changing the supported Python baseline. The package metadata in `pyproject.toml` remains the source of declared dependency compatibility; `uv.lock` records the concrete resolved environment.
+- Core dependencies include the Neo4j driver, Neo4j GraphRAG, Pydantic, provider clients, and test tooling. Provider clients are installed through the declared GraphRAG extras.
 - Configuration is supplied through environment variables or a local, ignored `.env` file. Secrets must never be embedded in source, fixtures, graph data, or benchmark artifacts.
 - Fixture and mock workflows must run without OpenRouter, a paid embedding service, or any other external model API.
 

@@ -1,0 +1,17 @@
+project-idea-files/*
+.DS_Store
+/dataset/*
+!/dataset/README.md
+agent-coordination/architecture-images/*
+.env
+.env.*
+!.env.example
+.venv/
+/build/
+/dist/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+debugging_logs/
+runs/
+/.vscode/

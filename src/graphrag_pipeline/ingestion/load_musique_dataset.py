@@ -12,7 +12,7 @@ dozens of paragraphs through the pipeline. Use ``--dry-run`` first to see the
 exact chunk count and identities before spending any OpenRouter budget.
 
 Example:
-    .venv/bin/python -m graphrag_pipeline.ingestion.load_musique_dataset \\
+    uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \\
         --records 3 --dry-run
 """
 

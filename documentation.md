@@ -23,7 +23,7 @@ Before running retrieval, verify the Neo4j and vector-index contract from the
 repository root:
 
 ```text
-.venv/bin/python -m graphrag_pipeline.retrieval_prerequisites
+uv run --locked python -m graphrag_pipeline.retrieval_prerequisites
 ```
 
 The check confirms connectivity, Neo4j version and edition, the installed

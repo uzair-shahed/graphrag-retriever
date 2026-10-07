@@ -1,6 +1,8 @@
-# Neo4j Fixture And Connection Package
+# Neo4j Setup And Smoke Test
 
-The current implementation is a small Python package for testing a Neo4j connection. It is not yet a complete GraphRAG application and does not have a command-line entry point.
+The root [README](../README.md) is the clean-clone macOS quick start and the
+canonical live GraphRAG procedure. This page records the narrower Neo4j
+connection and test workflow.
 
 ## Package Files
 
@@ -68,16 +70,17 @@ from graphrag_pipeline.config import Neo4jSettings
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 ```
 
-The tests use the installed package import path, `graphrag_pipeline`, rather than including the source directory name in the import. VS Code/Pylance must use the project virtual environment and treat `src` as an analysis path; that configuration is stored in `.vscode/settings.json`. This keeps editor resolution and runtime imports consistent.
+The tests use the installed package import path, `graphrag_pipeline`, rather
+than including the source directory name in the import. The editable package
+installation performed by `uv sync` keeps runtime imports consistent.
 
 ## Run Unit Tests
 
 From the repository root:
 
 ```bash
-source .venv/bin/activate
-python -m pip install -e ".[dev]"
-python -m pytest tests/unit -v
+uv sync --locked --extra dev
+uv run --locked python -m pytest tests/unit -v
 ```
 
 These tests do not need Neo4j running.
@@ -102,16 +105,18 @@ NEO4J_DATABASE=neo4j
 After starting Neo4j, run:
 
 ```bash
-source .venv/bin/activate
-python -m pytest tests/integration/test_neo4j_connection_smoke.py -v
+uv run --locked python -m pytest tests/integration/test_neo4j_connection_smoke.py -v
 ```
 
 To run all tests:
 
 ```bash
-python -m pytest tests -v
+uv run --locked python -m pytest tests -v
 ```
 
 ## Current Scope
 
-The current implementation's executable behavior is exposed through the tests and the `Neo4jConnection` class. There is currently no `main.py`, CLI command, or end-to-end GraphRAG pipeline yet.
+The connection smoke test checks Bolt connectivity and a temporary write/read/delete
+cycle. It does not initialize the GraphRAG graph or vector index. Follow the root
+README for fixture extraction, index setup, prerequisite verification, and a
+live query.
