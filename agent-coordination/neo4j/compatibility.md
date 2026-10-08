@@ -13,8 +13,11 @@ work should use this file before changing dependencies or Neo4j indexes.
 **Caveats:**
 The server/package compatibility values were locally verified on 23 September
 2026. The macOS clone workflow was updated on 7 October 2026, but has not yet
-been exercised on a second machine or an Intel Mac. Future package releases or
-server upgrades may change the API. Provider credentials remain local values.
+been exercised on a second machine or an Intel Mac. A Windows CI workflow now
+targets dependency installation, unit tests, and CLI startup; it does not
+validate a live Windows Neo4j server, APOC/GenAI plugins, or Ollama. Future
+package releases or server upgrades may change the API. Provider credentials
+remain local values.
 
 ## Local Compatibility Baseline
 
@@ -112,6 +115,12 @@ Neo4j connection. A fresh machine must still create its own database, configure
 credentials, run the fixture, and create the vector index; see the root
 [README](../../README.md) for those steps. The project prerequisite command
 checks the existing index but deliberately does not create or mutate it.
+
+Windows 11 x64 is the initial native Windows target. The Windows CI workflow
+checks the Python environment and no-service application path only. Local and
+remote Neo4j connectivity, APOC/GenAI procedure availability, vector-index
+behavior, OpenRouter requests, and local Ollama remain to be smoke-tested on
+Windows before claiming live-workflow compatibility.
 
 ## Official Sources
 

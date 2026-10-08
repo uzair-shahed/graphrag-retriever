@@ -3,6 +3,35 @@
 A Python application that extracts a knowledge graph into Neo4j and answers
 questions using Neo4j-backed retrieval and an OpenRouter or Ollama model.
 
+## Windows Quick Start
+
+The initial Windows target is Windows 11 x64 with PowerShell and Python 3.14.3.
+The Windows CI workflow is configured to check Python setup, unit tests, and
+CLI startup. The live Neo4j Desktop, APOC/GenAI plugin, and local Ollama setup
+below has not yet been verified on Windows.
+
+Install `uv` in PowerShell, then close and reopen the terminal so `uv` is on
+`PATH`:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Clone the repository and install the locked environment from the repository
+root:
+
+```powershell
+git clone <repository-url> project-repo
+Set-Location project-repo
+uv python install 3.14.3
+uv sync --locked --extra dev
+uv run --locked python -m pytest tests/unit -v
+uv run --locked graphrag-query --help
+```
+
+The unit tests need neither Neo4j nor model credentials. Run the app commands
+from the repository root; some fixture and data defaults are relative to it.
+
 ## macOS Quick Start
 
 The verified local baseline is macOS 15 on Apple Silicon with Python 3.14.3.
@@ -71,9 +100,7 @@ baseline, not a guarantee for every Neo4j release.
 6. Submit a custom question and write a local artifact:
 
    ```sh
-   uv run --locked graphrag-query \
-       --question "What company did Aster Systems acquire in 2021?" \
-     --artifact runs/mac-smoke.json
+   uv run --locked graphrag-query --question "What company did Aster Systems acquire in 2021?" --artifact runs/smoke.json
    ```
 
 The query needs an existing graph and online vector index. A successful
