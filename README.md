@@ -111,9 +111,36 @@ artifacts under `runs/` are local and ignored by Git.
 
 The official dataset is not included in a clone. See
 [dataset/README.md](dataset/README.md) for acquisition instructions and the
-expected location. Once downloaded, set `GRAPH_RAG_DATASET_PATHS` in `.env` to
-the desired JSONL file(s), then select a record with `--record-id`. Dataset
-ingestion can make many provider calls; use `--dry-run` before a paid run.
+expected location. Once downloaded, you can extract a bounded set of records
+into Neo4j. Start with a dry run to validate the JSONL path and inspect how many
+paragraph chunks will be processed:
+
+```sh
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
+   --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+   --records 1 \
+   --dry-run
+```
+
+When the summary looks right, repeat the command without `--dry-run` to run
+extraction and write the resulting graph data to the configured Neo4j database:
+
+```sh
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
+   --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+   --records 1
+```
+
+Each record typically contains about 20 paragraphs. The live command builds a
+Neo4j GraphRAG pipeline for each paragraph, which creates chunk embeddings and
+extracts entities and relationships; this can make many provider calls and
+incur charges. Increase `--records` gradually, and use `--start-record N` to
+choose the first 1-indexed record. The loader reports failed chunks and exits
+nonzero if extraction failures or invalid records occurred. After loading,
+create or verify the vector index as described in the live workflow above.
+
+To query a record from the downloaded file, set `GRAPH_RAG_DATASET_PATHS` in
+`.env` to that JSONL path and select its ID with `graphrag-query --record-id`.
 
 ## Further Documentation
 
