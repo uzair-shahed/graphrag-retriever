@@ -54,7 +54,7 @@ async def run_fixture(path: Path) -> dict[str, Any]:
                 getattr(llm, "last_response", None),
             )
             if response_path is not None:
-                print(json.dumps({"invalid_llm_response": str(response_path)}))
+                print(json.dumps({"invalid_llm_response": response_path.as_posix()}))
             raise
         return {
             "status": "succeeded",

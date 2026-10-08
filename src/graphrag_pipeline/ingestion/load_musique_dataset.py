@@ -325,7 +325,7 @@ async def run_requests(
                             getattr(llm, "last_response", None),
                         )
                         if response_path is not None:
-                            failure["invalid_llm_response"] = str(response_path)
+                            failure["invalid_llm_response"] = response_path.as_posix()
                     failed.append(failure)
                 else:
                     succeeded.append(
