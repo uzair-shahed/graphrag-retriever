@@ -72,7 +72,10 @@ def build_simple_kg_pipeline(
     else:
         llm = OllamaLLM(
             model_name=settings.llm_model,
-            model_params={"options": {"temperature": 0}},
+            model_params={
+                "think": False, # -- Does not need to always be active. Only turn on if using a hybrid model like qwen3:8b
+                "options": {"temperature": 0}
+                },
             host=settings.host,
         )
         embedder = OllamaEmbeddings(model=settings.embedding_model, host=settings.host)
