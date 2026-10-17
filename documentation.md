@@ -41,16 +41,104 @@ verification command does not create or mutate indexes; it fails instead when
 the configured index is absent, not online, aimed at a different property,
 or configured with incompatible dimensions or similarity.
 
-### GraphRAG retrieval adapter
+### GraphRAG and VectorRAG retrieval adapter
 
 The application retrieval boundary is in
 `src/graphrag_pipeline/retrieval.py`. After prerequisite verification, build a
 retriever with `build_retriever()` and submit a validated `QueryRequest` to
-`retrieve()`. The adapter supports `vector` and `vector_cypher` modes, passes
-the configured `top_k` to Neo4j, bounds the returned context, and preserves
-chunk and source provenance in `EvidenceChunk` values. Empty results remain
-explicitly empty; provider failures and malformed records raise
-`RetrievalError` rather than becoming successful answers.
+`retrieve()`. Select the high-level backend with
+`--retrieval-backend vectorrag|graphrag`. `vectorrag` supports `vector` and
+`vector_cypher` modes and sends the retrieved context to the local answer
+boundary. `graphrag` wraps the same Neo4j retriever with `GraphRAG.search()`;
+its generated answer and returned context are normalized without a second LLM
+call. Both paths pass the configured `top_k`, bound the returned context, and
+preserve chunk and source provenance in `EvidenceChunk` values. Empty results
+remain explicit; provider failures and malformed records raise `RetrievalError`
+rather than becoming successful answers.
+
+#### MuSiQue query disambiguation
+
+MuSiQue questions can be deliberately ambiguous because the same word may
+refer to several different entities in the record. For example, the question
+`Who is the spouse of the Green performer?` contains only the word `Green`,
+while the record includes paragraphs about the colour green, Green Party,
+Grant Green, and the album `Green (Steve Hillage album)`.
+
+For MuSiQue requests, the retrieval adapter therefore creates a separate
+embedding-search query from the original question plus a small set of
+record-title hints. It prefers specific parenthesized titles such as
+`Green (Steve Hillage album)` and falls back to the first few unique titles
+when no such title is available. The original question is never changed in
+the `QueryRequest`, answer prompt, response, or artifact; the extra text is
+only a retrieval aid. The adapter also filters candidates by the selected
+MuSiQue `record_id`, over-fetches candidates, and removes duplicate `chunk_id`
+rows before applying the final context limit.
+
+This helps the vector search identify the intended meaning of an ambiguous
+question without sending `is_supporting`, the gold answer, or other
+evaluation labels to the model. It is a disambiguation aid rather than a
+guarantee that the correct supporting paragraphs will rank first. The
+correctness report records whether the retrieved evidence actually covers the
+gold supporting paragraphs.
+
+### The answering pipeline in plain language
+
+When the command receives a question, it performs the following stages:
+
+1. **Select and validate the question.** A MuSiQue request keeps the exact
+    question, record ID, source file, source line, paragraph titles, and trace
+    ID. A custom question receives no MuSiQue provenance.
+2. **Optionally preload the record.** With `--preload`, each selected MuSiQue
+    paragraph is sent through `SimpleKGPipeline`. The pipeline extracts graph
+    entities and relationships, creates chunk embeddings, and writes the
+    resulting graph data to Neo4j. Without `--preload`, the existing graph is
+    queried as-is.
+3. **Build the retrieval query.** The application preserves the original
+    question. For MuSiQue, it may add selected source-title hints only for the
+    embedding search, as described above.
+4. **Retrieve graph evidence.** Neo4j's vector index compares the question
+    embedding with stored chunk embeddings. The application removes duplicate
+    chunks, keeps the bounded context, and retains each chunk's text and
+    provenance.
+5. **Generate a grounded answer.** The selected answer path receives the
+    question and retrieved evidence. It is instructed to answer only from that
+    evidence, cite evidence chunk IDs, and avoid guessing when the evidence is
+    insufficient.
+6. **Validate and record the result.** The response contract checks the
+    answer and citations. For MuSiQue, a separate correctness step compares
+    retrieved text with the original record and reports supporting-paragraph
+    coverage. The command writes the request, evidence, answer, citations,
+    correctness report, and errors to the JSON artifact.
+
+#### GraphRAG path
+
+With `--retrieval-backend graphrag`, the application builds a Neo4j
+`GraphRAG` object around the configured vector retriever. `GraphRAG.search()`
+performs retrieval, assembles the retrieved text into its own context, and
+calls the GraphRAG-compatible LLM to generate an answer. The application
+receives both the generated answer and the retriever context, then normalizes
+that context into `EvidenceChunk` values and uses the returned chunk IDs as
+citations. The application does not make a second answer-model call.
+
+In this project, GraphRAG still begins with vector similarity. The graph
+structure is available through the Neo4j retriever, but the configured
+retrieval query currently returns the matched chunk properties; it does not
+perform a custom multi-hop Cypher traversal for every question.
+
+#### VectorRAG path
+
+With `--retrieval-backend vectorrag`, the application calls
+`VectorRetriever` or `VectorCypherRetriever` directly. It receives the
+retrieved chunks but does not ask that retriever to generate an answer. The
+local answer boundary then builds a prompt containing the original question
+and bounded evidence, calls the configured LLM, parses its JSON response, and
+checks that every citation refers to a returned chunk.
+
+The practical difference is therefore the answer boundary: GraphRAG owns both
+retrieval and answer generation, while VectorRAG separates those responsibilities
+and lets the application own the final grounded-answer prompt and validation.
+Both paths depend on the same Neo4j vector index, embedding model, chunk
+provenance, and evidence limits.
 
 ### Grounded answer boundary
 
@@ -61,12 +149,14 @@ prompt contains only the question and returned evidence, with each chunk's
 `chunk_id` exposed as a citation candidate; MuSiQue gold answers, supporting
 fact labels, and decomposition fields are never sent to the provider.
 
-The provider must return JSON with exactly `answer` and `citations` fields.
-Citations must refer to returned evidence chunk IDs. Empty retrieval produces
+For VectorRAG, the provider must return JSON with exactly `answer` and
+`citations` fields. For GraphRAG, `GraphRAG.search()` supplies the answer and
+the adapter cites the returned context chunk IDs because the 1.21.0 result
+model does not expose generated citations. Empty retrieval produces
 `insufficient_evidence` without an LLM call. Provider exceptions, malformed
 JSON, empty answers, missing citations, and citations for unknown chunks
 produce `failed`; a `succeeded` `QueryResponse` always has a non-empty answer
-and citations while preserving request and evidence provenance.
+and citations while preserving request, backend, and evidence provenance.
 
 ### MuSiQue correctness verification
 
@@ -111,11 +201,12 @@ the command delegates to the existing bounded ingestion path before querying
 each selected MuSiQue record. Without it, no ingestion or re-extraction is
 performed.
 
-Retrieval is bounded with `--retrieval-mode vector|vector_cypher`, `--top-k`,
-and `--max-context-chunks`. The command verifies Neo4j retrieval prerequisites
-before execution, then uses the existing retriever, answer boundary, MuSiQue
-correctness verifier, and artifact writer. A missing graph, provider failure,
-malformed answer, or missing citation produces a nonzero exit status and does
-not become a successful answer. Required environment settings are documented
-in `.env.example`; the command requires a reachable Neo4j database and a
-verified vector index.
+Retrieval is bounded with `--retrieval-backend vectorrag|graphrag`,
+`--retrieval-mode vector|vector_cypher` (the mode applies to VectorRAG),
+`--top-k`, and `--max-context-chunks`. The command verifies Neo4j retrieval
+prerequisites before execution, then uses the selected backend, shared answer
+contract, MuSiQue correctness verifier, and artifact writer. A missing graph,
+provider failure, malformed answer, or missing citation produces a nonzero exit
+status and does not become a successful answer. Required environment settings
+are documented in `.env.example`; both backends require a reachable Neo4j
+database and a verified vector index.

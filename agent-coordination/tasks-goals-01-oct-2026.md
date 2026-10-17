@@ -29,12 +29,12 @@ answer boundary without reviving the archived hand-built extraction design.
 
 The local package is `neo4j-graphrag 1.21.0`. It exposes
 `neo4j_graphrag.generation.graphrag.GraphRAG.search()` and Neo4j-backed
-retrievers, but the repository does not yet configure or verify the retrieval
-index, query harness, answer contract, or answer-generation run. Those are the
-remaining implementation items. The first answer demonstration must not be
-described as complete until the returned evidence is proven to come from the
-graph. Preloading is controlled explicitly by `--preload` and must never happen
-implicitly.
+retrievers, but the repository does not yet configure or verify the selectable
+GraphRAG/VectorRAG retrieval backends, query harness, answer contract, or
+answer-generation run. Those are the remaining implementation items. The
+first answer demonstration must not be described as complete until the
+returned evidence is proven to come from the graph. Preloading is controlled
+explicitly by `--preload` and must never happen implicitly.
 
 ## Goal
 
@@ -44,7 +44,7 @@ Implement and verify one minimal local query flow:
 question (custom or selected from MuSiQue JSONL)
   -> validated query request
   -> optional record preload through SimpleKGPipeline
-  -> Neo4j GraphRAG retrieval from the available graph
+  -> selectable Neo4j GraphRAG or VectorRAG retrieval from the available graph
   -> answer generation using returned graph evidence
   -> answer or insufficient-evidence result with sources and trace
 ```
@@ -86,8 +86,8 @@ As of 6 October 2026:
 | Neo4j GenAI extraction | Complete for the verified slice | `src/graphrag_pipeline/extraction/pipeline.py` and `run_fixture.py` initialize and run `SimpleKGPipeline`. |
 | Bounded official-record ingestion | Complete for ingestion only | `src/graphrag_pipeline/ingestion/load_musique_dataset.py` supports record windows, dry runs, progress, and failure summaries. It does not answer questions. |
 | Graph/provenance verification | Complete for extraction evidence | `src/graphrag_pipeline/verification.py` and `tests/unit/test_graph_verifier.py` verify persisted `Document`/`Chunk` provenance read-only. |
-| GraphRAG retrieval | Missing in the application | `neo4j-graphrag 1.21.0` exposes `VectorRetriever`, `VectorCypherRetriever`, and `GraphRAG`, but no repository adapter invokes them. |
-| Answer generation | Missing in the application | No query request/response models, grounded answer boundary, citations, or insufficient-evidence result exists yet. |
+| GraphRAG/VectorRAG retrieval | Implemented offline; live run unverified | `neo4j-graphrag 1.21.0` is selected with `--retrieval-backend`; `GraphRAG.search()` and VectorRAG are normalized into the same evidence contract. |
+| Answer generation | Implemented offline; live run unverified | GraphRAG answers reuse the managed result; VectorRAG uses the grounded answer boundary with citations and explicit failure statuses. |
 | Retrieval-test command | Missing | No separate command can query an already-loaded graph without re-running ingestion. |
 | Retrieval index and live QA run | Unverified | The extraction graph contains chunk embeddings, but index name, dimensions, similarity, retrieval result shape, and a live answer run are not recorded. |
 
@@ -99,17 +99,29 @@ actual returned graph chunks, not assume one Neo4j chunk per MuSiQue paragraph.
 
 Maximally use Neo4j's GenAI pipeline and managed capabilities for the active
 path. Extraction through `SimpleKGPipeline` is already the verified write path.
-For answering, the application should use the installed GraphRAG
-`VectorRetriever` or `VectorCypherRetriever` with `GraphRAG.search()` rather
-than implementing local vector search or a second retrieval framework.
+For answering, the application should select one of two Neo4j-supported
+retrieval backends through a shared flag, for example
+`--retrieval-backend {graphrag,vectorrag}`:
+
+- `graphrag`: use `GraphRAG.search()` for Neo4j-managed retrieval, context
+  construction, and answer generation when the installed API supports the
+  required structured evidence contract.
+- `vectorrag`: use the existing `VectorRetriever` or
+  `VectorCypherRetriever` adapter, followed by the thin answer-generation
+  boundary when retrieval and generation are separate in the local API.
+
+Both backends must return the same structured evidence, citation, trace, and
+status contracts. The flag chooses the retrieval implementation; it must not
+change question selection, preloading, correctness verification, or artifact
+format.
 
 The active implementation priorities are:
 
 - Neo4j GenAI `SimpleKGPipeline` for paragraph-to-graph extraction (verified).
-- Neo4j-managed vector configuration and indexing for graph-backed retrieval
+- Neo4j-managed vector configuration and indexing for the VectorRAG backend
   (to configure and verify).
-- `neo4j_graphrag.generation.graphrag.GraphRAG.search()` for retrieval,
-  context construction, and answer generation (API available in 1.21.0).
+- `neo4j_graphrag.generation.graphrag.GraphRAG.search()` for the GraphRAG
+  backend's retrieval, context construction, and answer generation.
 - Neo4j's supported LLM/embedding integrations for the answer call, using the
   existing OpenRouter or Ollama settings.
 - Explicit Cypher verification only as a bounded evidence and correctness
@@ -240,33 +252,46 @@ missing, dimension-mismatch, unavailable-database, and malformed-retrieval
 conditions deterministically. Include a read-only provenance assertion for
 returned evidence.
 
-### 4. Implement the minimal Neo4j GraphRAG retrieval adapter
+### 4. Implement selectable GraphRAG/VectorRAG retrieval
 
 - Add a small retrieval module that accepts the validated MuSiQue question and
-  a fixed configuration for retrieval mode, top-K, and bounded graph context.
-- Call Neo4j's supported GraphRAG implementation rather than performing a
-  local vector query or manually assembling a competing retrieval algorithm.
+  a fixed configuration for retrieval backend, retrieval mode, top-K, and
+  bounded graph context.
+- Add an explicit `--retrieval-backend {graphrag,vectorrag}` flag. The default
+  must be documented and stable; it must never silently switch based on
+  provider availability.
+- For `graphrag`, call Neo4j's supported `GraphRAG.search()` implementation.
+- For `vectorrag`, call the supported `VectorRetriever` or
+  `VectorCypherRetriever` implementation. Do not implement local vector
+  search or manually assemble a competing retrieval algorithm.
 - Return structured evidence with chunk IDs, document IDs, source metadata,
   retrieved text, graph entities/relationships when available, and scores or
   ranking information when the plugin exposes them.
-- Preserve the original question and trace ID through the retrieval call.
-- Handle empty results, plugin errors, malformed plugin responses, and context
-  limits explicitly.
-**Evidence:** mocked unit tests for mode selection, top-K and empty/error
-responses; one local integration result showing Neo4j GraphRAG returned
-record-linked evidence.
+- Preserve the original question, trace ID, selected backend, and retrieval
+  mode through the retrieval call.
+- Normalize both backend result shapes into the same `RetrievalResult` and
+  `EvidenceChunk` contracts.
+- Handle unavailable backends, empty results, plugin errors, malformed plugin
+  responses, and context limits explicitly.
+**Evidence:** mocked unit tests for backend/mode selection, top-K and
+empty/error responses, normalized evidence, and one local integration result
+for each backend showing record-linked evidence.
 
-**Testing requirement:** Test the adapter independently for mode selection,
-top-K propagation, structured evidence mapping, empty results, provider
-errors, malformed responses, context limits, and record/provenance filtering.
+**Testing requirement:** Test both backends independently for backend and mode
+selection, top-K propagation, structured evidence mapping, empty results,
+provider errors, malformed responses, context limits, and record/provenance
+filtering. Test that the same input produces the same application-level
+contract regardless of backend.
 
 ### 5. Implement the answer-generation boundary
 
-- Use the answer-generation capability provided by Neo4j's GenAI/GraphRAG
-  stack when supported by the installed version and configuration.
-- If the local API separates retrieval from generation, add only the thinnest
-  provider adapter required to generate an answer from the Neo4j-returned
-  context. Keep model configuration in the existing OpenRouter settings.
+- Use the answer-generation capability provided by the selected Neo4j
+  GraphRAG backend when supported by the installed version and configuration.
+- If `vectorrag` separates retrieval from generation, add only the thinnest
+  provider adapter required to generate an answer from the returned context.
+  Keep model configuration in the existing OpenRouter/Ollama settings.
+- If `graphrag` returns an answer plus context, adapt that result into the
+  shared answer contract without running a second answer call.
 - Pass the MuSiQue question and retrieved evidence to the answer generator;
   do not pass supporting labels, gold answers, or decomposition labels as
   hidden hints.
@@ -294,8 +319,8 @@ provider failure, and preservation of trace and source metadata.
   input to extraction or generation.
 - Preserve a read-only graph trace showing the `Document`/`Chunk` provenance
   and the entity/relationship path used by GraphRAG where available.
-- Define an explicit insufficient-evidence response when GraphRAG cannot
-  support the question.
+- Define an explicit insufficient-evidence response when the selected
+  retrieval backend cannot support the question.
 - Store the raw question, retrieved evidence, answer, citations, plugin/model
   configuration, timings, and errors as a reproducible run artifact.
 
@@ -329,10 +354,11 @@ re-running paid calls.
   explicitly supplied. Never reload or re-extract implicitly.
 - Reuse the existing Neo4j/model settings conventions and avoid requiring the
   original AllenNLP environment.
-- Add flags for custom question, dataset path, record ID, retrieval mode,
-  top-K, output artifact, and progress/timing output as appropriate. Record
-  position may be supported as a convenience, but record ID is the required
-  stable selection path.
+- Add flags for custom question, dataset path, record ID, retrieval backend,
+  retrieval mode, top-K, output artifact, and progress/timing output as
+  appropriate. The backend flag must select GraphRAG or VectorRAG for the
+  same command path. Record position may be supported as a convenience, but
+  record ID is the required stable selection path.
 - Make the command print a concise structured result and write a full run
   artifact for audit.
 - Document prerequisites, Neo4j startup, environment variables, index setup,
@@ -352,7 +378,7 @@ and preload outcomes in the run artifact when preloading is enabled.
  questions, record-ID questions, configured dataset files, no-selector batch
  execution, output artifacts, and nonzero failure behavior.
 
-### 8. Create a separate GraphRAG retrieval-test program
+### 8. Create a separate GraphRAG/VectorRAG retrieval-test program
 
 The project must also provide a retrieval-test Python program for testing the
 GraphRAG system against the available Neo4j graph. It must expose the same
@@ -360,8 +386,8 @@ explicit `--preload` flag: when active it loads selected MuSiQue records before
 answering; when inactive it must not reload or re-extract records.
 
 - Add a separate command/module for query testing that connects to the
-  existing Neo4j graph and invokes the same Neo4j GenAI GraphRAG retrieval and
-  answer-generation path used by the end-to-end demonstrator.
+  existing Neo4j graph and invokes the same selectable GraphRAG or VectorRAG
+  retrieval and answer-generation path used by the end-to-end demonstrator.
 - Support a custom question supplied directly through the command line or an
   equivalent input option. A custom question must be clearly marked as
   externally supplied and must not be assigned a false MuSiQue record ID.
@@ -385,19 +411,20 @@ answering; when inactive it must not reload or re-extract records.
 - Preserve question origin metadata in every result: custom question, or
   MuSiQue dataset, source split, source file, record ID, and source line when
   available.
-- Reuse the validated query, retrieval, answer, citation, timing, and error
-  contracts from the main path rather than creating a second incompatible
-  response format.
+- Reuse the validated query, retrieval-backend, answer, citation, timing, and
+  error contracts from the main path rather than creating a second
+  incompatible response format.
 - Add flags for custom question, record ID, record position/range, `--preload`,
-  retrieval mode, top-K, output artifact path, and progress display as
-  appropriate. Record whether preloading was requested in every result.
-- Keep Neo4j GenAI GraphRAG as the retrieval implementation. The test program
-  is a query harness, not a local vector search or a replacement retrieval
-  implementation.
+  retrieval backend, retrieval mode, top-K, output artifact path, and progress
+  display as appropriate. Record the selected backend and whether preloading
+  was requested in every result.
+- Keep Neo4j GenAI GraphRAG or VectorRAG as the selected retrieval
+  implementation. The test program is a query harness, not a local vector
+  search or a replacement retrieval implementation.
 - Add offline tests covering custom-question selection, MuSiQue-question
-  selection, multiple-record execution, optional preloading, missing graph
-  data in query-only mode, empty retrieval, and preservation of
-  question/provenance metadata.
+  selection, multiple-record execution, both retrieval-backend choices,
+  optional preloading, missing graph data in query-only mode, empty retrieval,
+  and preservation of question/provenance metadata.
 - Document that this program supports repeated query-only experiments against
   available graphs and optional preloading experiments. When `--preload` is
   active, record ingestion time separately from retrieval and answer time.
@@ -427,8 +454,8 @@ This goal is complete when all of the following are true:
 - When `--preload` is active, the preloading step converts each selected
   record's paragraphs into validated chunks and processes them by Neo4j GenAI
   `SimpleKGPipeline`; when it is inactive, no preloading occurs.
-- Neo4j's GenAI GraphRAG retrieves evidence from the resulting graph using the
-  configured retrieval path.
+- The selected Neo4j GenAI GraphRAG or VectorRAG backend retrieves evidence
+  from the resulting graph using the configured retrieval path.
 - The system produces an answer or an explicit insufficient-evidence result.
 - The response identifies the source record, chunks, citations, retrieval mode,
   and trace/run ID.
@@ -444,10 +471,14 @@ This goal is complete when all of the following are true:
   citations, status, and trace metadata.
 - A separate retrieval-test program supports both query-only execution against
   graphs loaded earlier and explicit `--preload` execution, using either a
-  custom question or questions selected from MuSiQue records.
+  custom question or questions selected from MuSiQue records, and can select
+  either GraphRAG or VectorRAG through a flag.
+- GraphRAG and VectorRAG produce the same application-level evidence, answer,
+  citation, provenance, status, and artifact contracts.
 - The implementation uses Neo4j GenAI capabilities maximally for extraction,
-  indexing, GraphRAG retrieval, and answer generation, with local Python code
-  limited to validation, orchestration, provenance, and verification.
+  indexing, the selected GraphRAG or VectorRAG retrieval path, and answer
+  generation, with local Python code limited to validation, orchestration,
+  provenance, and verification.
 
 ## Explicitly Deferred
 
@@ -472,7 +503,7 @@ question-to-answer path is operational.
 | Question contract and record selection | Week 4 dataset handling; Week 6 query request/response contract |
 | Plugin-managed record ingestion | Week 4 ingestion; Week 5 `SimpleKGPipeline` extraction |
 | Vector/index prerequisites | Week 4 Neo4j schema/index work; Week 6 plugin retrieval configuration |
-| GraphRAG retrieval | Week 6 configurable VectorRAG/GraphRAG retrieval |
+| Selectable GraphRAG/VectorRAG retrieval | Week 6 configurable VectorRAG/GraphRAG retrieval |
 | Answer and evidence contract | Week 6 common answer-generation interface; Week 7 grounding checks |
 | MuSiQue correctness verification | Week 7 supporting-fact/path cross-checks |
 | Tests and reproducibility | Cross-cutting engineering quality; Week 6 retrieval tests; Week 7 deterministic fixtures |
