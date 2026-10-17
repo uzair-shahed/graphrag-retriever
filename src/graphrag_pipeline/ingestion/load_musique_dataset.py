@@ -143,6 +143,40 @@ def measure_duration_seconds(start: float) -> float:
     return time.perf_counter() - start
 
 
+def synchronize_chunk_provenance(connection: Neo4jConnection, chunk_id: str) -> None:
+    """Copy application provenance from a plugin Document onto its Chunk nodes.
+
+    Args:
+        connection: Neo4j connection used for the bounded write.
+        chunk_id: Application chunk ID stored on the plugin-created Document.
+
+    Effects:
+        Makes chunk-level retrieval results self-describing for the vector
+        retriever and read-only provenance verifier.
+
+    Raises:
+        RuntimeError: If the plugin-created document cannot be found.
+    """
+    rows = connection.run_write(
+        """
+        MATCH (c:Chunk)-[:FROM_DOCUMENT]->(d:Document)
+        WHERE d.chunk_id = $chunk_id
+        SET c.chunk_id = d.chunk_id,
+            c.record_id = d.record_id,
+            c.document_id = d.document_id,
+            c.source_file = d.source_file,
+            c.source_line = d.source_line,
+            c.source_sha256 = d.source_sha256,
+            c.paragraph_idx = d.paragraph_idx,
+            c.title = d.title
+        RETURN count(c) AS chunks
+        """,
+        {"chunk_id": chunk_id},
+    )
+    if not rows or rows[0].get("chunks", 0) < 1:
+        raise RuntimeError(f"plugin-created document not found for chunk {chunk_id!r}")
+
+
 def derive_source_split(dataset_path: Path) -> str:
     """Infer a provenance split label such as ``full_dev`` from the file name."""
     parts = dataset_path.stem.split("_")
@@ -272,10 +306,9 @@ async def run_requests(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Send every validated chunk request through the live pipeline in order.
 
-    One pipeline instance is built per chunk so a failure or unusual provider
-    response for one paragraph cannot carry state into the next; this mirrors
-    the only verified invocation pattern in this project (``run_fixture.py``).
-    A failure on one chunk is recorded and does not stop the remaining chunks.
+    One pipeline instance is reused for the batch so schema setup is not
+    repeated for every paragraph. A failure on one chunk is recorded and does
+    not stop the remaining chunks.
 
     A tqdm progress bar tracks chunk-level progress and reports, as a running
     postfix, how many records have already had every one of their chunks
@@ -292,6 +325,7 @@ async def run_requests(
     connection = Neo4jConnection(neo4j_settings)
     try:
         driver = connection.connect()
+        pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
         progress = tqdm(
             total=len(requests),
             desc="Loading MuSiQue chunks",
@@ -307,10 +341,9 @@ async def run_requests(
                     current_record_failed = False
 
                 text, document_metadata = build_plugin_input(request)
-                pipeline = None
                 try:
-                    pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
                     result = await pipeline.run_async(text=text, document_metadata=document_metadata)
+                    synchronize_chunk_provenance(connection, request.chunk_id)
                 except Exception as error:  # noqa: BLE001 - recorded, not swallowed
                     current_record_failed = True
                     failure = {

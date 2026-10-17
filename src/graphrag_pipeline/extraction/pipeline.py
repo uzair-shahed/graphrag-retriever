@@ -81,7 +81,9 @@ def build_simple_kg_pipeline(
         embedder = OllamaEmbeddings(model=settings.embedding_model, host=settings.host)
         schema = "FREE"
     if isinstance(settings, OpenRouterSettings):
-        schema = None
+        # A fixed free schema avoids per-run automatic schema generation and
+        # conflicting constraints when multiple paragraphs are preloaded.
+        schema = "FREE"
     text_splitter = FixedSizeSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,

@@ -47,6 +47,7 @@ def test_run_requests_counts_records_with_a_failing_chunk_as_not_succeeded(
     """A record with any failed chunk is excluded from the succeeded-record count."""
     mock_connection = MagicMock()
     mock_connection.connect.return_value = MagicMock()
+    mock_connection.run_write.return_value = [{"chunks": 1}]
     mock_connection_cls.return_value = mock_connection
 
     pipeline = MagicMock()
@@ -74,6 +75,7 @@ def test_run_requests_counts_records_with_a_failing_chunk_as_not_succeeded(
     assert len(succeeded) == 3
     assert len(failed) == 1
     assert failed[0]["chunk_id"] == "musique:record-2:paragraph:0"
+    mock_build_pipeline.assert_called_once()
 
     records_loaded = count_fully_succeeded_records(requests, failed)
     assert records_loaded == 1
