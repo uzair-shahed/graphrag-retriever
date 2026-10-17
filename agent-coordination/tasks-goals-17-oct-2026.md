@@ -132,6 +132,65 @@ assumed.
   the managed answer's wording. Feeding graph structure into the answer
   prompt itself is left for Task 3 (answer contract) if needed.
 
+### Task 2 — Identical GraphRAG answer context and artifact evidence (2026-10-17)
+
+**Status:** Implemented, tested, and verified live.
+
+**Root cause found:** the GraphRAG backend asked `GraphRAG.search()` for
+`candidate_k = 4 * top_k` rows, which the managed answer model read in full,
+and only afterwards trimmed the retained evidence to `max_context_chunks`.
+The answer could therefore rest on chunks absent from the response, citations,
+and artifact. Separately, `generate_answer` used a fixed default evidence
+bound (5) unrelated to the configured `--max-context-chunks`, so response
+evidence could silently differ from the artifact's retrieval evidence.
+
+**What was implemented:**
+
+- `retrieval.py`: GraphRAG is no longer over-fetched; it requests
+  `RetrievalSettings.graphrag_seed_k = min(top_k, max_context_chunks)` rows.
+  If the managed context still holds more distinct chunks than
+  `max_context_chunks`, `retrieve` raises `RetrievalError` instead of trimming
+  evidence the answer already used. Duplicate rows collapse to one evidence
+  chunk without tripping the check. VectorRAG keeps its over-fetch because its
+  answer is generated afterwards from the already-bounded list.
+- `answer.py`: a pre-generated (GraphRAG) answer whose retrieval evidence
+  exceeds `max_evidence_chunks` becomes a `failed` response rather than being
+  sliced to a smaller list. VectorRAG citation validation is unchanged.
+- `query_command.py`: `generate_answer` now receives
+  `AnswerSettings(max_evidence_chunks=retrieval_settings.max_context_chunks)`,
+  so the prompt, response, and artifact share one bound.
+- `musique_verification.py`: `CorrectnessReport` gained
+  `evidence_boundary_consistent`, true only when response evidence chunk IDs
+  equal the artifact's retrieval evidence chunk IDs.
+
+**Tests:**
+
+- `tests/unit/test_retrieval.py`: GraphRAG seed count is capped at the
+  evidence bound; an over-fetched answer-bearing third chunk raises
+  `RetrievalError` (the regression the task asks for); duplicate context rows
+  do not hide or inflate evidence.
+- `tests/unit/test_answer.py`: a pre-generated answer that saw more chunks than
+  the bound fails with no answer; within the bound, response evidence and
+  citations equal the retrieved evidence.
+- `tests/unit/test_musique_verification.py`: `evidence_boundary_consistent`
+  is true for matching and false for differing evidence.
+- `tests/unit/test_query_command.py`: with three retrieved rows and a bound of
+  two, the prompt excludes the third, and response and artifact evidence match.
+- Live: `graphrag-query --retrieval-backend graphrag --top-k 8
+  --max-context-chunks 3 --artifact ...` returned status `succeeded` with
+  identical response, artifact, and citation IDs and
+  `evidence_boundary_consistent: true`.
+- Full suite: 138 passed.
+
+**Caveats:**
+
+- A GraphRAG `--top-k` larger than `--max-context-chunks` is now silently
+  capped to the context bound for the managed answer path. This is recorded
+  here rather than in the artifact; Task 6 should add the effective seed count
+  to run metadata.
+- Each citation still equals every evidence chunk for GraphRAG; narrowing
+  citations to the chunks that support the answer is Task 3.
+
 ## Goal
 
 Harden the existing Neo4j GraphRAG and VectorRAG question-to-answer path.

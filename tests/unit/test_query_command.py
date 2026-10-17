@@ -152,3 +152,37 @@ def test_resolve_retrieval_mode_defaults_graphrag_to_vector_cypher() -> None:
     assert _resolve_retrieval_mode("vectorrag", None) == "vector"
     assert _resolve_retrieval_mode("vectorrag", "vector_cypher") == "vector_cypher"
     assert _resolve_retrieval_mode("graphrag", "vector") == "vector"
+
+
+def test_command_bounds_answer_evidence_to_retrieval_context_limit(tmp_path: Path) -> None:
+    """Prompt, response, and artifact all use the same bounded evidence list."""
+    retriever = MagicMock()
+    retriever.search.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                content=f"Chunk text {index}",
+                metadata={"chunk_id": f"chunk-{index}", "document_id": "document-1"},
+            )
+            for index in (1, 2, 3)
+        ]
+    )
+    llm = MagicMock()
+    llm.invoke.return_value = SimpleNamespace(content='{"answer":"A","citations":["chunk-1"]}')
+    request = custom_query("Question?", trace_id="bounded-trace")
+
+    responses = asyncio.run(
+        execute_queries(
+            [request],
+            retriever=retriever,
+            llm=llm,
+            retrieval_settings=RetrievalSettings(top_k=3, max_context_chunks=2),
+            artifact_path=tmp_path / "bounded.json",
+        )
+    )
+
+    artifact = json.loads((tmp_path / "bounded.json").read_text(encoding="utf-8"))
+    response_ids = [item["chunk_id"] for item in responses[0].model_dump(mode="json")["evidence"]]
+    artifact_ids = [item["chunk_id"] for item in artifact["retrieval"]["evidence"]]
+    assert response_ids == artifact_ids == ["chunk-1", "chunk-2"]
+    assert "chunk-3" not in llm.invoke.call_args.kwargs["input"]
+    assert artifact["correctness"]["evidence_boundary_consistent"] is True

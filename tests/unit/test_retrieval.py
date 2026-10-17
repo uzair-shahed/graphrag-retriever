@@ -137,7 +137,7 @@ def test_retrieve_uses_graphrag_search_and_retains_generated_answer() -> None:
     graphrag.search.assert_called_once_with(
         query_text="Which company acquired Northwind Labs?",
         retriever_config={
-            "top_k": 12,
+            "top_k": 3,
             "query_params": {"node_limit": 200, "query_limit": 201},
         },
         return_context=True,
@@ -385,3 +385,53 @@ def test_retrieve_rejects_non_bool_graph_complete() -> None:
 
     with pytest.raises(RetrievalError, match="invalid graph_complete"):
         retrieve(request(), retriever, retrieval_settings=RetrievalSettings(mode="vector_cypher"))
+
+
+def test_graphrag_seed_count_never_exceeds_the_evidence_bound() -> None:
+    """GraphRAG is not over-fetched, so its answer cannot see candidates evidence omits."""
+    graphrag = MagicMock()
+    graphrag.search.return_value = SimpleNamespace(
+        answer="Aster Systems",
+        retriever_result=SimpleNamespace(items=[evidence_item("chunk-1"), evidence_item("chunk-2")]),
+    )
+    settings = RetrievalSettings(
+        backend="graphrag", mode="vector_cypher", top_k=10, max_context_chunks=2
+    )
+
+    result = retrieve(request(), graphrag, retrieval_settings=settings)
+
+    assert graphrag.search.call_args.kwargs["retriever_config"]["top_k"] == 2
+    assert [item.chunk_id for item in result.evidence] == ["chunk-1", "chunk-2"]
+
+
+def test_graphrag_rejects_answer_context_larger_than_retained_evidence() -> None:
+    """An over-fetched candidate holding the answer is an explicit failure, never hidden support."""
+    graphrag = MagicMock()
+    graphrag.search.return_value = SimpleNamespace(
+        answer="Answer found only in chunk-3",
+        retriever_result=SimpleNamespace(
+            items=[evidence_item("chunk-1"), evidence_item("chunk-2"), evidence_item("chunk-3")]
+        ),
+    )
+    settings = RetrievalSettings(
+        backend="graphrag", mode="vector_cypher", top_k=2, max_context_chunks=2
+    )
+
+    with pytest.raises(RetrievalError, match="exceeding max_context_chunks=2"):
+        retrieve(request(), graphrag, retrieval_settings=settings)
+
+
+def test_graphrag_duplicate_context_rows_do_not_hide_evidence() -> None:
+    """Duplicate rows collapse to one evidence chunk without exceeding the bound."""
+    graphrag = MagicMock()
+    graphrag.search.return_value = SimpleNamespace(
+        answer="Aster Systems",
+        retriever_result=SimpleNamespace(items=[evidence_item("chunk-1"), evidence_item("chunk-1")]),
+    )
+    settings = RetrievalSettings(
+        backend="graphrag", mode="vector_cypher", top_k=2, max_context_chunks=2
+    )
+
+    result = retrieve(request(), graphrag, retrieval_settings=settings)
+
+    assert [item.chunk_id for item in result.evidence] == ["chunk-1"]

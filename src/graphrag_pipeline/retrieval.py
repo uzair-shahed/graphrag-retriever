@@ -81,6 +81,15 @@ class RetrievalSettings:
         """Return an over-fetched candidate bound for duplicate graph rows."""
         return self.top_k * 4
 
+    @property
+    def graphrag_seed_k(self) -> int:
+        """Return the seed count for the GraphRAG backend.
+
+        The managed ``GraphRAG.search()`` answers from every row it retrieves,
+        so it must never be over-fetched beyond the retained evidence bound.
+        """
+        return min(self.top_k, self.max_context_chunks)
+
     def __post_init__(self) -> None:
         if self.top_k < 1:
             raise ValueError("top_k must be positive")
@@ -475,7 +484,7 @@ def retrieve(
     try:
         if settings.backend == "graphrag":
             retriever_config: dict[str, Any] = {
-                "top_k": settings.candidate_k,
+                "top_k": settings.graphrag_seed_k,
             }
             if request.record_id:
                 retriever_config["filters"] = {"record_id": request.record_id}
@@ -498,7 +507,15 @@ def retrieve(
                     evidence=[],
                     backend="graphrag",
                 )
-            evidence = [_evidence_from_item(item) for item in _unique_items(items)[: settings.max_context_chunks]]
+            unique_items = _unique_items(items)
+            if len(unique_items) > settings.max_context_chunks:
+                # The answer was already generated from these rows, so trimming
+                # evidence now would hide support the answer may depend on.
+                raise RetrievalError(
+                    f"GraphRAG answer context has {len(unique_items)} chunks, exceeding "
+                    f"max_context_chunks={settings.max_context_chunks}"
+                )
+            evidence = [_evidence_from_item(item) for item in unique_items]
             generated_answer = getattr(raw_result, "answer", None)
             if not isinstance(generated_answer, str) or not generated_answer.strip():
                 raise RetrievalError("GraphRAG response is missing an answer")

@@ -204,3 +204,17 @@ def test_write_run_artifact_contains_query_evidence_answer_and_configuration(tmp
     assert artifact["response"]["citations"] == ["musique:record-1:paragraph:1"]
     assert artifact["correctness"]["graph_membership"]["status"] == "not_checked"
     assert artifact["configuration"]["top_k"] == 5
+
+
+def test_verify_query_correctness_reports_evidence_boundary_consistency() -> None:
+    """The report flags a response whose evidence differs from the retrieval artifact."""
+    retrieval = evidence(("musique:record-1:paragraph:1", "Aster Systems acquired Northwind Labs."))
+    matching = response().model_copy(
+        update={"evidence": [EvidenceChunk(chunk_id="musique:record-1:paragraph:1", text="Aster Systems acquired Northwind Labs.")]}
+    )
+
+    consistent = verify_query_correctness(request(), retrieval, matching, raw_record())
+    inconsistent = verify_query_correctness(request(), retrieval, response(), raw_record())
+
+    assert consistent.evidence_boundary_consistent is True
+    assert inconsistent.evidence_boundary_consistent is False

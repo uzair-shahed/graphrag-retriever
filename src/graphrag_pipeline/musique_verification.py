@@ -70,6 +70,7 @@ class CorrectnessReport(BaseModel):
     record_id: StrictStr | None = None
     evidence: EvidenceCorrectness
     graph_membership: GraphMembership
+    evidence_boundary_consistent: StrictBool
 
 
 def _supporting_indices(raw_record: dict[str, Any]) -> set[int]:
@@ -274,6 +275,10 @@ def verify_query_correctness(
         record_id=request.record_id,
         evidence=evidence_report,
         graph_membership=graph_report,
+        evidence_boundary_consistent=(
+            [item.chunk_id for item in response.evidence]
+            == [item.chunk_id for item in retrieval.evidence]
+        ),
     )
 
 

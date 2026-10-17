@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from graphrag_pipeline.answer import build_answer_llm, generate_answer
+from graphrag_pipeline.answer import AnswerSettings, build_answer_llm, generate_answer
 from graphrag_pipeline.config import (
     Neo4jSettings,
     dataset_paths_from_env,
@@ -136,7 +136,15 @@ async def execute_queries(
         retrieval: RetrievalResult
         try:
             retrieval = retrieve(request, retriever, retrieval_settings=retrieval_settings)
-            response = generate_answer(request, retrieval, llm)
+            response = generate_answer(
+                request,
+                retrieval,
+                llm,
+                answer_settings=AnswerSettings(
+                    retrieval_mode=retrieval.mode,
+                    max_evidence_chunks=retrieval_settings.max_context_chunks,
+                ),
+            )
         except RetrievalError as error:
             retrieval = _empty_retrieval(
                 request,

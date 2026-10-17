@@ -165,6 +165,12 @@ def generate_answer(
 
     try:
         if retrieval.generated_answer is not None:
+            if len(retrieval.evidence) > settings.max_evidence_chunks:
+                # The pre-generated answer already saw every retrieved chunk.
+                raise AnswerGenerationError(
+                    f"generated answer used {len(retrieval.evidence)} chunks, exceeding "
+                    f"max_evidence_chunks={settings.max_evidence_chunks}"
+                )
             return QueryResponse(
                 **metadata,
                 status="succeeded",

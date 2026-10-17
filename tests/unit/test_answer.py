@@ -185,3 +185,49 @@ def test_build_answer_llm_uses_existing_provider_settings() -> None:
         embedding_model="local-embedding",
     )
     assert build_answer_llm(ollama).model_name == "local-llm"
+
+
+def test_generate_answer_rejects_pregenerated_answer_that_saw_more_than_the_bound() -> None:
+    """A GraphRAG answer built from more chunks than the bound is a failure, not a truncated success."""
+    llm = MagicMock()
+    retrieval_result = RetrievalResult(
+        trace_id="trace-1",
+        question="Which company acquired Northwind Labs?",
+        mode="graphrag",
+        backend="graphrag",
+        generated_answer="Answer that depended on chunk-2",
+        evidence=[chunk("chunk-1"), chunk("chunk-2")],
+    )
+
+    response = generate_answer(
+        request(),
+        retrieval_result,
+        llm,
+        answer_settings=AnswerSettings(retrieval_mode="graphrag", max_evidence_chunks=1),
+    )
+
+    assert response.status == "failed"
+    assert response.answer is None
+    assert "exceeding max_evidence_chunks=1" in response.error
+
+
+def test_generate_answer_keeps_pregenerated_answer_evidence_identical_to_retrieval() -> None:
+    """Within the bound, response evidence is exactly the retrieved evidence."""
+    retrieval_result = RetrievalResult(
+        trace_id="trace-1",
+        question="Which company acquired Northwind Labs?",
+        mode="graphrag",
+        backend="graphrag",
+        generated_answer="Aster Systems",
+        evidence=[chunk("chunk-1"), chunk("chunk-2")],
+    )
+
+    response = generate_answer(
+        request(),
+        retrieval_result,
+        MagicMock(),
+        answer_settings=AnswerSettings(retrieval_mode="graphrag", max_evidence_chunks=2),
+    )
+
+    assert [item.chunk_id for item in response.evidence] == ["chunk-1", "chunk-2"]
+    assert response.citations == ["chunk-1", "chunk-2"]
