@@ -43,9 +43,15 @@ from typing import Any, Literal
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
 from neo4j_graphrag.generation.graphrag import GraphRAG
+from neo4j_graphrag.generation.prompts import RagTemplate
 from neo4j_graphrag.retrievers import VectorCypherRetriever
 from neo4j_graphrag.types import RetrieverResultItem
 
+from graphrag_pipeline.answer_context import (
+    ANSWER_PROMPT_TEMPLATE,
+    ANSWER_SYSTEM_INSTRUCTIONS,
+    render_evidence_context,
+)
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
 from graphrag_pipeline.query import EvidenceChunk, GraphNode, GraphRelationship, QueryRequest
 from graphrag_pipeline.retrieval_prerequisites import VectorIndexSettings
@@ -175,11 +181,15 @@ def _format_record(record: Any) -> RetrieverResultItem:
     metadata = dict(values)
     metadata.update(
         {
+            "text": text,
             "score": _record_value(record, "score"),
             "graph_references": _record_value(record, "graph_references") or [],
         }
     )
-    return RetrieverResultItem(content=text, metadata=metadata)
+    # ``content`` is what GraphRAG.search shows the answer model, so it carries
+    # the same bracketed chunk ID and graph lines as the VectorRAG prompt.
+    evidence = _evidence_from_item(RetrieverResultItem(content=text, metadata=metadata))
+    return RetrieverResultItem(content=render_evidence_context([evidence]), metadata=metadata)
 
 
 def _retrieval_query_vector() -> str:
@@ -323,16 +333,29 @@ def build_graphrag(retriever: Any, llm: Any) -> GraphRAG:
 
     Returns:
         A GraphRAG instance that owns retrieval, context construction, and
-        answer generation for the GraphRAG backend.
+        answer generation, using the same instructions and JSON output
+        contract as the VectorRAG prompt; ``generate_answer`` validates its
+        output with the same parser and citation check.
     """
-    return GraphRAG(retriever=retriever, llm=llm)
+    return GraphRAG(
+        retriever=retriever,
+        llm=llm,
+        prompt_template=RagTemplate(
+            template=ANSWER_PROMPT_TEMPLATE,
+            expected_inputs=["context", "query_text"],
+            system_instructions=ANSWER_SYSTEM_INSTRUCTIONS,
+        ),
+    )
 
 
 def _evidence_from_item(item: Any) -> EvidenceChunk:
     """Validate one GraphRAG retriever item as an application evidence chunk."""
     content = getattr(item, "content", None)
     metadata = getattr(item, "metadata", None) or {}
-    if not isinstance(content, str) or not content:
+    # Rendered ``content`` may carry citation brackets and graph lines; the raw
+    # chunk text travels in metadata so evidence text stays verifiable.
+    text = metadata.get("text") or content
+    if not isinstance(text, str) or not text:
         raise RetrievalError("retriever returned evidence without text")
     chunk_id = metadata.get("chunk_id")
     if not isinstance(chunk_id, str) or not chunk_id:
@@ -361,7 +384,7 @@ def _evidence_from_item(item: Any) -> EvidenceChunk:
         raise RetrievalError(f"invalid graph_complete flag for {chunk_id!r}")
     return EvidenceChunk(
         chunk_id=chunk_id,
-        text=content,
+        text=text,
         document_id=metadata.get("document_id"),
         source_file=metadata.get("source_file"),
         source_line=source_line,
@@ -517,7 +540,7 @@ def retrieve(
                 )
             evidence = [_evidence_from_item(item) for item in unique_items]
             generated_answer = getattr(raw_result, "answer", None)
-            if not isinstance(generated_answer, str) or not generated_answer.strip():
+            if not isinstance(generated_answer, str):
                 raise RetrievalError("GraphRAG response is missing an answer")
             return RetrievalResult(
                 trace_id=request.trace_id,

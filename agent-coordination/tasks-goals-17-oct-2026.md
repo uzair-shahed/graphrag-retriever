@@ -191,6 +191,63 @@ evidence could silently differ from the artifact's retrieval evidence.
 - Each citation still equals every evidence chunk for GraphRAG; narrowing
   citations to the chunks that support the answer is Task 3.
 
+### Task 3 — One strict answer contract for both backends (2026-10-17)
+
+**Status:** Implemented, tested, and verified live.
+
+**What was implemented:**
+
+- New `src/graphrag_pipeline/answer_context.py` holds the single answer
+  instruction template, system instruction, and evidence renderer
+  (`[chunk_id] text`, plus entity/relationship lines and a truncation note
+  when a chunk carries a graph component).
+- VectorRAG builds its prompt from that template. GraphRAG's
+  `build_graphrag` now passes the same template to `GraphRAG.search` as a
+  `RagTemplate`, and each retrieved row's `content` is rendered by the same
+  function, so the managed context equals the VectorRAG context byte for byte.
+  Raw chunk text moved to `metadata["text"]` so `EvidenceChunk.text` stays
+  the unmodified paragraph that graph verification compares.
+- `answer.py`: new `validate_generated_answer` is used by both backends. It
+  rejects empty or malformed output, extra fields, empty citations, blank
+  answers, and citations outside the evidence shown to the model, and
+  de-duplicates repeated citations. GraphRAG no longer cites every evidence
+  chunk; it cites only what the model declares. One surrounding markdown
+  code fence is tolerated for both backends.
+- `retrieval.py`: a blank managed answer is no longer a retrieval error; it
+  reaches the answer boundary and becomes a `failed` response that keeps the
+  evidence. `insufficient_evidence` is still assigned only for empty evidence,
+  before any validation.
+
+**Tests:**
+
+- `tests/unit/test_answer.py`: the same seven invalid-output cases (empty,
+  blank, malformed, missing citations, extra field, blank answer, citation
+  outside evidence) parametrized across both backends, each asserting
+  `failed`, no answer or citations, and retained evidence; empty evidence
+  gives `insufficient_evidence` for both; subset citation with duplicate
+  collapse for both; code-fence tolerance; VectorRAG prompt equals the shared
+  template.
+- `tests/unit/test_retrieval.py`: formatted row content is citable and keeps
+  raw text in metadata; joined managed context equals the VectorRAG
+  rendering including graph lines; truncated components are labelled;
+  `build_graphrag` uses the shared template; a blank managed answer is
+  preserved for validation.
+- Live: `--retrieval-backend graphrag` and `vectorrag` on the same question
+  both returned `succeeded`, answer "Tim Berners-Lee", three evidence chunks,
+  and one citation (paragraph 0).
+- Full suite: 163 passed.
+
+**Caveats:**
+
+- For MuSiQue, GraphRAG's `query_text` carries the source-title hints into the
+  managed prompt (VectorRAG's prompt uses the plain question). `GraphRAG.search`
+  has a single `query_text`, so this cannot be separated without replacing
+  the managed call. Left for Task 5, which owns the title-hint behavior.
+- The VectorRAG prompt now also shows graph lines when run in
+  `vector_cypher` mode; `vector` mode (the baseline) is unchanged.
+- The contract has no way for the model to say "insufficient evidence"; a
+  model that cannot answer must still cite, or the response fails.
+
 ## Goal
 
 Harden the existing Neo4j GraphRAG and VectorRAG question-to-answer path.

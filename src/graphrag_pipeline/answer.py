@@ -1,11 +1,13 @@
 """Grounded answer-generation boundary for retrieved GraphRAG evidence.
 
-Last modified: 2026-10-06
+Last modified: 2026-10-17
 
 Purpose of this file:
     Send a validated question and Neo4j-returned evidence to the configured
     GraphRAG-supported LLM, then enforce answer and citation requirements in
-    the application's ``QueryResponse`` contract.
+    the application's ``QueryResponse`` contract. The same JSON contract and
+    ``validate_generated_answer`` check apply whether the answer came from this
+    module's own LLM call (VectorRAG) or from ``GraphRAG.search`` (GraphRAG).
 
 Files that use this file:
     The query command and retrieval-test program will build an answer LLM with
@@ -15,19 +17,24 @@ Files that use this file:
 Caveats:
     Retrieval is performed by ``graphrag_pipeline.retrieval``. This boundary
     intentionally does not pass MuSiQue gold labels, supporting-fact labels, or
-    decomposition fields to the provider.
+    decomposition fields to the provider. Provider output is parsed strictly
+    except that one surrounding markdown code fence is accepted. The model
+    cannot declare insufficient evidence itself; ``insufficient_evidence`` is
+    only produced when retrieval returns no evidence.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 from neo4j_graphrag.llm import OllamaLLM, OpenAILLM
 
+from graphrag_pipeline.answer_context import ANSWER_PROMPT_TEMPLATE, render_evidence_context
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
-from graphrag_pipeline.query import QueryResponse, QueryRequest
+from graphrag_pipeline.query import EvidenceChunk, QueryResponse, QueryRequest
 from graphrag_pipeline.retrieval import RetrievalResult
 
 
@@ -92,20 +99,11 @@ def build_answer_llm(
     )
 
 
-def _prompt(request: QueryRequest, retrieval: RetrievalResult, limit: int) -> str:
-    """Build a provider prompt containing only the question and graph evidence."""
-    evidence = retrieval.evidence[:limit]
-    context = "\n\n".join(
-        f"[{item.chunk_id}] {item.text}" for item in evidence
-    )
-    return (
-        "Answer the question using only the graph evidence below. "
-        "Return valid JSON with exactly two fields: answer (string) and "
-        "citations (array of chunk_id strings). Every citation must identify "
-        "evidence used in the answer. If the evidence does not support an "
-        "answer, do not guess.\n\n"
-        f"Question: {request.question}\n\n"
-        f"Graph evidence:\n{context}"
+def _prompt(request: QueryRequest, evidence: list[EvidenceChunk]) -> str:
+    """Build the VectorRAG prompt from the shared template and bounded evidence."""
+    return ANSWER_PROMPT_TEMPLATE.format(
+        query_text=request.question,
+        context=render_evidence_context(evidence),
     )
 
 
@@ -122,15 +120,47 @@ def _response_metadata(request: QueryRequest) -> dict[str, Any]:
     }
 
 
+_CODE_FENCE = re.compile(r"^```(?:json)?\s*(?P<body>.*?)\s*```$", re.DOTALL | re.IGNORECASE)
+
+
 def _parse_provider_output(raw_response: Any) -> GeneratedAnswer:
     """Parse provider content and normalize malformed JSON as an application error."""
     content = getattr(raw_response, "content", raw_response)
     if not isinstance(content, str) or not content.strip():
         raise AnswerGenerationError("answer provider returned empty content")
+    fenced = _CODE_FENCE.match(content.strip())
+    if fenced:
+        content = fenced.group("body")
     try:
         return GeneratedAnswer.model_validate_json(content)
     except (ValidationError, ValueError) as error:
         raise AnswerGenerationError("answer provider returned malformed JSON output") from error
+
+
+def validate_generated_answer(raw_response: Any, evidence: list[EvidenceChunk]) -> GeneratedAnswer:
+    """Apply the answer contract shared by VectorRAG and GraphRAG.
+
+    Args:
+        raw_response: Provider response object or raw JSON text.
+        evidence: The exact bounded evidence the model was shown.
+
+    Returns:
+        The parsed answer with duplicate citations removed, order preserved.
+
+    Raises:
+        AnswerGenerationError: For empty or malformed output, a blank answer,
+            or any citation that is not a chunk ID in ``evidence``.
+    """
+    generated = _parse_provider_output(raw_response)
+    if not generated.answer.strip():
+        raise AnswerGenerationError("answer provider returned an empty answer")
+    evidence_ids = {item.chunk_id for item in evidence}
+    invalid_citations = [citation for citation in generated.citations if citation not in evidence_ids]
+    if invalid_citations:
+        raise AnswerGenerationError(
+            f"answer cited chunks outside retrieved evidence: {invalid_citations}"
+        )
+    return generated.model_copy(update={"citations": list(dict.fromkeys(generated.citations))})
 
 
 def generate_answer(
@@ -171,27 +201,13 @@ def generate_answer(
                     f"generated answer used {len(retrieval.evidence)} chunks, exceeding "
                     f"max_evidence_chunks={settings.max_evidence_chunks}"
                 )
-            return QueryResponse(
-                **metadata,
-                status="succeeded",
-                answer=retrieval.generated_answer,
-                retrieval_mode=settings.retrieval_mode,
-                evidence=evidence,
-                citations=[item.chunk_id for item in evidence],
+            raw_response = retrieval.generated_answer
+        else:
+            raw_response = llm.invoke(
+                input=_prompt(request, evidence),
+                response_format={"type": "json_object"},
             )
-        raw_response = llm.invoke(
-            input=_prompt(request, retrieval, settings.max_evidence_chunks),
-            response_format={"type": "json_object"},
-        )
-        generated = _parse_provider_output(raw_response)
-        if not generated.answer.strip():
-            raise AnswerGenerationError("answer provider returned an empty answer")
-        evidence_ids = {item.chunk_id for item in evidence}
-        invalid_citations = [citation for citation in generated.citations if citation not in evidence_ids]
-        if invalid_citations:
-            raise AnswerGenerationError(
-                f"answer cited chunks outside retrieved evidence: {invalid_citations}"
-            )
+        generated = validate_generated_answer(raw_response, evidence)
         return QueryResponse(
             **metadata,
             status="succeeded",

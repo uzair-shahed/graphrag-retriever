@@ -435,3 +435,92 @@ def test_graphrag_duplicate_context_rows_do_not_hide_evidence() -> None:
     result = retrieve(request(), graphrag, retrieval_settings=settings)
 
     assert [item.chunk_id for item in result.evidence] == ["chunk-1"]
+
+
+def formatted_record(chunk_id: str, text: str, **extra) -> dict:
+    """Build one raw Neo4j-style row for the retriever result formatter."""
+    return {"chunk_id": chunk_id, "text": text, "document_id": "document-1", "score": 0.5, **extra}
+
+
+def test_format_record_renders_model_context_and_keeps_raw_text_in_metadata() -> None:
+    """Managed GraphRAG context shows citable chunk IDs while evidence text stays raw."""
+    from graphrag_pipeline.retrieval import _format_record
+
+    item = _format_record(formatted_record("chunk-1", "Raw paragraph text."))
+
+    assert item.content == "[chunk-1] Raw paragraph text.\n"
+    assert item.metadata["text"] == "Raw paragraph text."
+    evidence = retrieve_evidence_from_items([item])
+    assert evidence[0].text == "Raw paragraph text."
+
+
+def retrieve_evidence_from_items(items):
+    """Run the retrieval adapter over fake items and return its evidence."""
+    retriever = MagicMock()
+    retriever.search.return_value = SimpleNamespace(items=items)
+    return retrieve(request(), retriever).evidence
+
+
+def test_format_record_context_matches_vectorrag_prompt_evidence_rendering() -> None:
+    """GraphRAG.search joins row content with newlines; that equals the VectorRAG context."""
+    from graphrag_pipeline.answer_context import render_evidence_context
+    from graphrag_pipeline.retrieval import _format_record
+
+    nodes = [{"id": "n1", "labels": ["Person"], "name": "Alice"}, {"id": "n2", "labels": ["Company"], "name": "Acme"}]
+    rels = [{"type": "WORKS_AT", "start_node_id": "n1", "end_node_id": "n2"}]
+    rows = [
+        formatted_record("chunk-1", "Alice works at Acme.", graph_nodes=nodes, graph_relationships=rels, graph_complete=True),
+        formatted_record("chunk-2", "Second paragraph."),
+    ]
+
+    items = [_format_record(row) for row in rows]
+    managed_context = "\n".join(item.content for item in items)
+    evidence = retrieve_evidence_from_items(items)
+
+    assert managed_context == render_evidence_context(evidence)
+    assert "Entities in this chunk: Alice (Person); Acme (Company)" in managed_context
+    assert "Relationships in this chunk: Alice -[WORKS_AT]-> Acme" in managed_context
+
+
+def test_format_record_marks_truncated_graph_component() -> None:
+    """A size-limited component is labelled so the model is not told it is complete."""
+    from graphrag_pipeline.retrieval import _format_record
+
+    row = formatted_record(
+        "chunk-1",
+        "Text.",
+        graph_nodes=[{"id": "n1", "labels": ["Person"], "name": "Alice"}],
+        graph_relationships=[],
+        graph_complete=False,
+    )
+
+    assert "truncated by a size limit" in _format_record(row).content
+
+
+def test_build_graphrag_uses_the_shared_answer_template() -> None:
+    """The managed GraphRAG prompt uses the same instructions as the VectorRAG prompt."""
+    from graphrag_pipeline.answer_context import ANSWER_PROMPT_TEMPLATE, ANSWER_SYSTEM_INSTRUCTIONS
+    from graphrag_pipeline.retrieval import build_graphrag
+
+    with patch("graphrag_pipeline.retrieval.GraphRAG") as graphrag_cls:
+        build_graphrag("retriever", "llm")
+
+    template = graphrag_cls.call_args.kwargs["prompt_template"]
+    assert template.template == ANSWER_PROMPT_TEMPLATE
+    assert template.system_instructions == ANSWER_SYSTEM_INSTRUCTIONS
+    assert "context" in template.expected_inputs and "query_text" in template.expected_inputs
+
+
+def test_graphrag_blank_answer_is_kept_for_contract_validation() -> None:
+    """A blank managed answer reaches the answer boundary instead of a retrieval error."""
+    graphrag = MagicMock()
+    graphrag.search.return_value = SimpleNamespace(
+        answer="",
+        retriever_result=SimpleNamespace(items=[evidence_item()]),
+    )
+    settings = RetrievalSettings(backend="graphrag", mode="vector_cypher")
+
+    result = retrieve(request(), graphrag, retrieval_settings=settings)
+
+    assert result.generated_answer == ""
+    assert [item.chunk_id for item in result.evidence] == ["chunk-1"]
