@@ -88,6 +88,15 @@ def _supporting_indices(raw_record: dict[str, Any]) -> set[int]:
                     values.add(int(index))
             except (TypeError, ValueError):
                 continue
+    if values:
+        return values
+    for paragraph in raw_record.get("paragraphs", []):
+        if not isinstance(paragraph, dict) or paragraph.get("is_supporting") is not True:
+            continue
+        try:
+            values.add(int(paragraph["idx"]))
+        except (KeyError, TypeError, ValueError):
+            continue
     return values
 
 

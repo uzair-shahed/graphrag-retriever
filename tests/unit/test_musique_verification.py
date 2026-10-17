@@ -116,6 +116,26 @@ def test_compare_musique_evidence_marks_unknown_and_missing_supporting_chunks() 
     assert report.supporting_paragraphs_covered is False
 
 
+def test_compare_musique_evidence_reads_paragraph_supporting_flags() -> None:
+    """MuSiQue paragraph-level labels are included in coverage checks."""
+    record = raw_record()
+    record.pop("supporting_facts")
+    record["paragraphs"][0]["is_supporting"] = True
+    record["paragraphs"][1]["is_supporting"] = True
+
+    report = compare_musique_evidence(
+        request(),
+        evidence(
+            ("musique:record-1:paragraph:1", "Aster Systems acquired Northwind Labs."),
+            ("musique:record-1:paragraph:2", "The deal closed in 2021."),
+        ),
+        record,
+    )
+
+    assert report.supporting_paragraph_indices == [1, 2]
+    assert report.supporting_paragraphs_covered is True
+
+
 def test_verify_graph_evidence_membership_requires_matching_graph_text() -> None:
     """A chunk is verified only when ID, record filter, and text all match."""
     connection = DummyConnection(
