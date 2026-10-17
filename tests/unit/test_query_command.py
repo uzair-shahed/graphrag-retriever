@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from graphrag_pipeline.query import custom_query, select_queries
-from graphrag_pipeline.query_command import build_requests, execute_queries
+from graphrag_pipeline.query_command import _resolve_retrieval_mode, build_requests, execute_queries
 from graphrag_pipeline.retrieval import RetrievalSettings
 
 
@@ -144,3 +144,11 @@ def test_build_requests_rejects_question_with_dataset_selection(tmp_path: Path) 
         assert "cannot be combined" in str(error)
     else:
         raise AssertionError("expected mixed source modes to be rejected")
+
+
+def test_resolve_retrieval_mode_defaults_graphrag_to_vector_cypher() -> None:
+    """An unset mode defaults from the backend without overriding an explicit choice."""
+    assert _resolve_retrieval_mode("graphrag", None) == "vector_cypher"
+    assert _resolve_retrieval_mode("vectorrag", None) == "vector"
+    assert _resolve_retrieval_mode("vectorrag", "vector_cypher") == "vector_cypher"
+    assert _resolve_retrieval_mode("graphrag", "vector") == "vector"

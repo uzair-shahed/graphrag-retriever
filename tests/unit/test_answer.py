@@ -76,6 +76,27 @@ def test_generate_answer_marks_empty_evidence_insufficient_without_provider_call
     llm.invoke.assert_not_called()
 
 
+def test_generate_answer_uses_graph_rag_answer_without_second_llm_call() -> None:
+    """GraphRAG's generated answer is returned with its context citations."""
+    llm = MagicMock()
+    retrieval_result = RetrievalResult(
+        trace_id="trace-1",
+        question="Which company acquired Northwind Labs?",
+        mode="graphrag",
+        backend="graphrag",
+        generated_answer="Aster Systems",
+        evidence=[chunk()],
+    )
+
+    response = generate_answer(request(), retrieval_result, llm)
+
+    assert response.status == "succeeded"
+    assert response.answer == "Aster Systems"
+    assert response.citations == ["chunk-1"]
+    assert response.retrieval_backend == "graphrag"
+    llm.invoke.assert_not_called()
+
+
 def test_generate_answer_rejects_provider_citation_outside_evidence() -> None:
     """Citations must refer to returned graph chunks."""
     llm = MagicMock()

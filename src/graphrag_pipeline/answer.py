@@ -154,6 +154,7 @@ def generate_answer(
     """
     settings = answer_settings or AnswerSettings(retrieval_mode=retrieval.mode)
     metadata = _response_metadata(request)
+    metadata["retrieval_backend"] = retrieval.backend
     evidence = retrieval.evidence[: settings.max_evidence_chunks]
     if not evidence:
         return QueryResponse(
@@ -163,6 +164,15 @@ def generate_answer(
         )
 
     try:
+        if retrieval.generated_answer is not None:
+            return QueryResponse(
+                **metadata,
+                status="succeeded",
+                answer=retrieval.generated_answer,
+                retrieval_mode=settings.retrieval_mode,
+                evidence=evidence,
+                citations=[item.chunk_id for item in evidence],
+            )
         raw_response = llm.invoke(
             input=_prompt(request, retrieval, settings.max_evidence_chunks),
             response_format={"type": "json_object"},

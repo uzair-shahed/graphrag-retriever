@@ -75,10 +75,39 @@ class QueryRequest(BaseModel):
     paragraph_indices: list[StrictInt] = Field(default_factory=list)
     paragraph_titles: list[StrictStr] = Field(default_factory=list)
     preload: StrictBool = False
+    retrieval_backend: Literal["graphrag", "vectorrag"] = "vectorrag"
+
+
+class GraphNode(BaseModel):
+    """One extracted entity node in a chunk's associated knowledge subgraph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: StrictStr = Field(min_length=1)
+    labels: list[StrictStr] = Field(default_factory=list)
+    name: StrictStr | None = None
+
+
+class GraphRelationship(BaseModel):
+    """One relationship between two nodes in a chunk's associated subgraph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: StrictStr = Field(min_length=1)
+    start_node_id: StrictStr = Field(min_length=1)
+    end_node_id: StrictStr = Field(min_length=1)
 
 
 class EvidenceChunk(BaseModel):
-    """One graph-backed evidence chunk returned by retrieval."""
+    """One graph-backed evidence chunk returned by retrieval.
+
+    Args:
+        graph_nodes: Entities traversed from this chunk's seed node (GraphRAG
+            mode only; always empty for the VectorRAG vector-only baseline).
+        graph_relationships: Relationships among ``graph_nodes`` and the seed.
+        graph_component_complete: Whether the returned subgraph is the full
+            seed-associated component, or was truncated by a resource budget.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -89,6 +118,9 @@ class EvidenceChunk(BaseModel):
     source_line: StrictInt | None = Field(default=None, ge=1)
     score: StrictFloat | None = None
     graph_references: list[StrictStr] = Field(default_factory=list)
+    graph_nodes: list[GraphNode] = Field(default_factory=list)
+    graph_relationships: list[GraphRelationship] = Field(default_factory=list)
+    graph_component_complete: StrictBool = True
 
 
 class QueryResponse(BaseModel):
@@ -124,6 +156,7 @@ class QueryResponse(BaseModel):
     source_file: StrictStr | None = None
     source_line: StrictInt | None = Field(default=None, ge=1)
     preload: StrictBool = False
+    retrieval_backend: Literal["graphrag", "vectorrag"] = "vectorrag"
     answer: StrictStr | None = None
     retrieval_mode: StrictStr = Field(min_length=1)
     evidence: list[EvidenceChunk] = Field(default_factory=list)

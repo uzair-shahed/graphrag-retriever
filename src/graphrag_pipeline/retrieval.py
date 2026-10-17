@@ -1,33 +1,53 @@
 """Neo4j GraphRAG retrieval adapter for structured graph evidence.
 
-Last modified: 2026-10-06
+Last modified: 2026-10-17
 
 Purpose of this file:
-    Construct the supported Neo4j ``VectorRetriever`` or
-    ``VectorCypherRetriever``, submit a validated query, and map returned graph
-    records into the application's ``EvidenceChunk`` contract.
+    Construct a Neo4j ``VectorCypherRetriever``, submit a validated query, and
+    map returned graph records into the application's ``EvidenceChunk``
+    contract, including each seed chunk's associated entity subgraph.
 
 Files that use this file:
-    The future query command and retrieval-test program will call
-    ``retrieve``. Unit tests mock the Neo4j retriever and embedding boundaries.
+    The query command and retrieval-test program call ``retrieve``. Unit tests
+    mock the Neo4j retriever and embedding boundaries.
 
 Caveats:
-    This module retrieves evidence only. ``GraphRAG.search()`` answer
-    generation and read-only prerequisite verification remain separate steps.
+    The persisted graph stores chunk provenance (``chunk_id``, ``record_id``,
+    ``document_id``, ``title``, ``source_file``) on the ``Document`` node, one
+    hop from the vector-matched ``Chunk`` node via ``FROM_DOCUMENT`` -- the
+    ``Chunk`` node itself only has ``text``/``embedding``/``index``. Both
+    retrieval modes resolve provenance through that hop; a plain
+    ``VectorRetriever`` cannot, so this module always builds a
+    ``VectorCypherRetriever``. GraphRAG mode additionally traverses the seed
+    chunk's own associated entity subgraph via ``apoc.path.subgraphAll``
+    (entities connected through ``FROM_CHUNK``, plus entity-entity
+    relationships); live inventory on 2026-10-17 confirmed the persisted graph
+    has no cross-chunk or cross-record entity links, so traversal is
+    intentionally scoped to one seed chunk's own subgraph, not a multi-chunk
+    component. GraphRAG results are normalized into the same evidence contract
+    as the VectorRAG path. GraphRAG-generated answers are retained so the
+    answer boundary does not invoke the provider a second time; note that
+    Neo4j's managed ``GraphRAG.search()`` prompt only sees chunk ``text``, not
+    the structured ``graph_nodes``/``graph_relationships`` metadata -- that
+    metadata is retained for evidence/citation/verification purposes even
+    though it does not influence the managed answer's wording.
 """
 
 from __future__ import annotations
 
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
-from neo4j_graphrag.retrievers import VectorCypherRetriever, VectorRetriever
+from neo4j_graphrag.generation.graphrag import GraphRAG
+from neo4j_graphrag.retrievers import VectorCypherRetriever
 from neo4j_graphrag.types import RetrieverResultItem
 
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
-from graphrag_pipeline.query import EvidenceChunk, QueryRequest
+from graphrag_pipeline.query import EvidenceChunk, GraphNode, GraphRelationship, QueryRequest
 from graphrag_pipeline.retrieval_prerequisites import VectorIndexSettings
 
 
@@ -35,19 +55,41 @@ class RetrievalError(RuntimeError):
     """Raised when Neo4j returns an unusable retrieval result or provider error."""
 
 
+# Relationship types that are lexical-graph/provenance infrastructure, not
+# domain knowledge; traversal must never cross these to leave the seed chunk.
+_STRUCTURAL_RELATIONSHIP_TYPES = frozenset({"FROM_DOCUMENT", "FROM_CHUNK", "NEXT_CHUNK"})
+# Relationship type names are LLM-extracted (schema="FREE"); only identifiers
+# matching this pattern are safe to compose into an APOC relationshipFilter.
+_SAFE_RELATIONSHIP_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+RetrievalBackend = Literal["graphrag", "vectorrag"]
+
+
 @dataclass(frozen=True)
 class RetrievalSettings:
     """Bounded configuration for one GraphRAG retrieval call."""
 
+    backend: RetrievalBackend = "vectorrag"
     mode: Literal["vector", "vector_cypher"] = "vector"
     top_k: int = 5
     max_context_chunks: int = 5
+    max_graph_nodes: int = 200
+
+    @property
+    def candidate_k(self) -> int:
+        """Return an over-fetched candidate bound for duplicate graph rows."""
+        return self.top_k * 4
 
     def __post_init__(self) -> None:
         if self.top_k < 1:
             raise ValueError("top_k must be positive")
         if self.max_context_chunks < 1:
             raise ValueError("max_context_chunks must be positive")
+        if self.max_graph_nodes < 1:
+            raise ValueError("max_graph_nodes must be positive")
+        if self.backend == "graphrag" and self.mode != "vector_cypher":
+            raise ValueError("graphrag backend requires vector_cypher retrieval mode")
 
 
 @dataclass(frozen=True)
@@ -58,6 +100,8 @@ class RetrievalResult:
     question: str
     mode: str
     evidence: list[EvidenceChunk]
+    backend: RetrievalBackend = "vectorrag"
+    generated_answer: str | None = None
 
     @property
     def has_evidence(self) -> bool:
@@ -91,7 +135,7 @@ def _record_value(record: Any, key: str) -> Any:
 
 
 def _format_record(record: Any) -> RetrieverResultItem:
-    """Map a raw Neo4j record to text plus provenance metadata."""
+    """Map a raw Neo4j record to text plus provenance and graph metadata."""
     node = _record_value(record, "node")
     if isinstance(node, dict):
         values = node
@@ -108,6 +152,9 @@ def _format_record(record: Any) -> RetrieverResultItem:
                 "source_sha256",
                 "paragraph_idx",
                 "title",
+                "graph_nodes",
+                "graph_relationships",
+                "graph_complete",
             )
         }
     text = values.get("text") or _record_value(record, "text")
@@ -126,15 +173,79 @@ def _format_record(record: Any) -> RetrieverResultItem:
     return RetrieverResultItem(content=text, metadata=metadata)
 
 
-def _retrieval_query() -> str:
-    """Return the bounded Cypher projection used by VectorCypherRetriever."""
+def _retrieval_query_vector() -> str:
+    """Return the Document-hop-only projection for the VectorRAG baseline.
+
+    The vector-matched ``Chunk`` node only has ``text``/``embedding``/
+    ``index``; provenance (``chunk_id``, ``record_id``, ``document_id``,
+    ``title``, ``source_file``) lives one hop away on ``Document`` via
+    ``FROM_DOCUMENT``. This mode never traverses entities.
+    """
     return (
-        "RETURN node.text AS text, node.chunk_id AS chunk_id, "
-        "node.document_id AS document_id, node.record_id AS record_id, "
-        "node.source_file AS source_file, node.source_line AS source_line, "
-        "node.source_sha256 AS source_sha256, node.paragraph_idx AS paragraph_idx, "
-        "node.title AS title, score"
+        "MATCH (node)-[:FROM_DOCUMENT]->(doc:Document) "
+        "RETURN node.text AS text, doc.chunk_id AS chunk_id, "
+        "doc.document_id AS document_id, doc.record_id AS record_id, "
+        "doc.source_file AS source_file, doc.source_line AS source_line, "
+        "doc.source_sha256 AS source_sha256, doc.paragraph_idx AS paragraph_idx, "
+        "doc.title AS title, score"
     )
+
+
+def _retrieval_query_vector_cypher(relationship_filter: str) -> str:
+    """Return the Document-hop plus seed chunk entity-subgraph projection.
+
+    Traverses only the seed chunk's own associated entities (via the reverse
+    ``FROM_CHUNK`` relationship and the given domain-relationship allowlist)
+    with no hop-depth ceiling; ``$node_limit``/``$query_limit`` are resource
+    safeguards supplied as query parameters by ``retrieve``. ``FROM_DOCUMENT``
+    is excluded from ``relationship_filter`` so traversal can never leave the
+    seed chunk's own subgraph.
+    """
+    return (
+        "MATCH (node)-[:FROM_DOCUMENT]->(doc:Document) "
+        "CALL apoc.path.subgraphAll(node, {"
+        f"relationshipFilter: '{relationship_filter}', "
+        "minLevel: 0, maxLevel: -1, limit: $query_limit"
+        "}) YIELD nodes, relationships "
+        "RETURN node.text AS text, doc.chunk_id AS chunk_id, "
+        "doc.document_id AS document_id, doc.record_id AS record_id, "
+        "doc.source_file AS source_file, doc.source_line AS source_line, "
+        "doc.source_sha256 AS source_sha256, doc.paragraph_idx AS paragraph_idx, "
+        "doc.title AS title, score, "
+        "[n IN nodes WHERE n:`__Entity__` | {"
+        "id: elementId(n), "
+        "labels: [l IN labels(n) WHERE NOT l IN ['__Entity__', '__KGBuilder__']], "
+        "name: n.name}] AS graph_nodes, "
+        "[r IN relationships WHERE type(r) <> 'FROM_CHUNK' | {"
+        "type: type(r), start_node_id: elementId(startNode(r)), end_node_id: elementId(endNode(r))"
+        "}] AS graph_relationships, "
+        "(size(nodes) <= $node_limit) AS graph_complete"
+    )
+
+
+def _discover_relationship_allowlist(driver: Any, neo4j_database: str) -> str:
+    """Build an APOC relationshipFilter from the live graph's relationship types.
+
+    Returns ``FROM_CHUNK<`` (incoming, to reach a chunk's entities) plus every
+    other observed relationship type, excluding lexical-graph infrastructure
+    types (``FROM_DOCUMENT``/``NEXT_CHUNK``) so traversal cannot leave the
+    seed chunk's own subgraph, and excluding any type name that is not a safe
+    Cypher identifier (relationship types are LLM-extracted, schema="FREE").
+    """
+    try:
+        with driver.session(database=neo4j_database) as session:
+            rows = session.run("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType").data()
+    except Exception as error:  # noqa: BLE001 - normalize driver errors at this boundary
+        raise RetrievalError(f"relationship-type inventory failed: {error}") from error
+    domain_types = sorted(
+        {
+            row["relationshipType"]
+            for row in rows
+            if row.get("relationshipType") not in _STRUCTURAL_RELATIONSHIP_TYPES
+            and _SAFE_RELATIONSHIP_TYPE.match(row.get("relationshipType") or "")
+        }
+    )
+    return "|".join(["FROM_CHUNK<", *domain_types])
 
 
 def build_retriever(
@@ -144,8 +255,9 @@ def build_retriever(
     *,
     index_settings: VectorIndexSettings | None = None,
     retrieval_settings: RetrievalSettings | None = None,
+    relationship_types: Sequence[str] | None = None,
 ) -> Any:
-    """Build a configured Neo4j GraphRAG retriever.
+    """Build a configured Neo4j GraphRAG ``VectorCypherRetriever``.
 
     Args:
         driver: Neo4j driver passed directly to the supported retriever.
@@ -153,9 +265,14 @@ def build_retriever(
         model_settings: Existing OpenRouter or Ollama embedding settings.
         index_settings: Expected vector-index contract.
         retrieval_settings: Retrieval mode and bounds.
+        relationship_types: Override for the live relationship-type inventory
+            (``vector_cypher`` mode only); discovered from ``driver`` when
+            omitted. Deterministic tests pass an explicit list.
 
     Returns:
-        A configured ``VectorRetriever`` or ``VectorCypherRetriever``.
+        A configured ``VectorCypherRetriever``. A plain ``VectorRetriever``
+        cannot be used: the vector-matched ``Chunk`` node does not carry the
+        ``chunk_id``/``record_id`` provenance this application requires.
     """
     index = index_settings or VectorIndexSettings.from_env()
     retrieval = retrieval_settings or RetrievalSettings()
@@ -168,26 +285,38 @@ def build_retriever(
         "result_formatter": _format_record,
     }
     if retrieval.mode == "vector":
-        return VectorRetriever(
-            **common,
-            return_properties=[
-                "chunk_id",
-                "text",
-                "document_id",
-                "record_id",
-                "source_file",
-                "source_line",
-                "source_sha256",
-                "paragraph_idx",
-                "title",
-            ],
-        )
+        return VectorCypherRetriever(**common, retrieval_query=_retrieval_query_vector())
     if retrieval.mode == "vector_cypher":
+        if relationship_types is None:
+            relationship_filter = _discover_relationship_allowlist(driver, neo4j_database)
+        else:
+            domain_types = sorted(
+                {
+                    rel_type
+                    for rel_type in relationship_types
+                    if rel_type not in _STRUCTURAL_RELATIONSHIP_TYPES and _SAFE_RELATIONSHIP_TYPE.match(rel_type)
+                }
+            )
+            relationship_filter = "|".join(["FROM_CHUNK<", *domain_types])
         return VectorCypherRetriever(
             **common,
-            retrieval_query=_retrieval_query(),
+            retrieval_query=_retrieval_query_vector_cypher(relationship_filter),
         )
     raise ValueError(f"unsupported retrieval mode: {retrieval.mode}")
+
+
+def build_graphrag(retriever: Any, llm: Any) -> GraphRAG:
+    """Build Neo4j's managed GraphRAG search boundary.
+
+    Args:
+        retriever: Configured Neo4j-supported vector retriever.
+        llm: Configured Neo4j-supported answer LLM.
+
+    Returns:
+        A GraphRAG instance that owns retrieval, context construction, and
+        answer generation for the GraphRAG backend.
+    """
+    return GraphRAG(retriever=retriever, llm=llm)
 
 
 def _evidence_from_item(item: Any) -> EvidenceChunk:
@@ -214,6 +343,13 @@ def _evidence_from_item(item: Any) -> EvidenceChunk:
     references = metadata.get("graph_references") or []
     if not isinstance(references, list) or not all(isinstance(item, str) for item in references):
         raise RetrievalError(f"invalid graph references for {chunk_id!r}")
+    graph_nodes = _graph_nodes_from_metadata(metadata, chunk_id)
+    graph_relationships = _graph_relationships_from_metadata(metadata, chunk_id)
+    graph_complete = metadata.get("graph_complete")
+    if graph_complete is None:
+        graph_complete = True
+    elif not isinstance(graph_complete, bool):
+        raise RetrievalError(f"invalid graph_complete flag for {chunk_id!r}")
     return EvidenceChunk(
         chunk_id=chunk_id,
         text=content,
@@ -222,7 +358,92 @@ def _evidence_from_item(item: Any) -> EvidenceChunk:
         source_line=source_line,
         score=score,
         graph_references=references,
+        graph_nodes=graph_nodes,
+        graph_relationships=graph_relationships,
+        graph_component_complete=graph_complete,
     )
+
+
+def _graph_nodes_from_metadata(metadata: dict[str, Any], chunk_id: str) -> list[GraphNode]:
+    """Validate the APOC-projected entity list for one seed chunk."""
+    raw_nodes = metadata.get("graph_nodes") or []
+    if not isinstance(raw_nodes, list):
+        raise RetrievalError(f"invalid graph_nodes for {chunk_id!r}")
+    nodes: list[GraphNode] = []
+    for raw_node in raw_nodes:
+        if not isinstance(raw_node, dict) or not isinstance(raw_node.get("id"), str) or not raw_node["id"]:
+            raise RetrievalError(f"invalid graph node entry for {chunk_id!r}")
+        labels = raw_node.get("labels") or []
+        if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+            raise RetrievalError(f"invalid graph node labels for {chunk_id!r}")
+        nodes.append(GraphNode(node_id=raw_node["id"], labels=labels, name=raw_node.get("name")))
+    return nodes
+
+
+def _graph_relationships_from_metadata(metadata: dict[str, Any], chunk_id: str) -> list[GraphRelationship]:
+    """Validate the APOC-projected relationship list for one seed chunk."""
+    raw_rels = metadata.get("graph_relationships") or []
+    if not isinstance(raw_rels, list):
+        raise RetrievalError(f"invalid graph_relationships for {chunk_id!r}")
+    relationships: list[GraphRelationship] = []
+    for raw_rel in raw_rels:
+        if (
+            not isinstance(raw_rel, dict)
+            or not isinstance(raw_rel.get("type"), str)
+            or not raw_rel["type"]
+            or not isinstance(raw_rel.get("start_node_id"), str)
+            or not raw_rel["start_node_id"]
+            or not isinstance(raw_rel.get("end_node_id"), str)
+            or not raw_rel["end_node_id"]
+        ):
+            raise RetrievalError(f"invalid graph relationship entry for {chunk_id!r}")
+        relationships.append(
+            GraphRelationship(
+                type=raw_rel["type"],
+                start_node_id=raw_rel["start_node_id"],
+                end_node_id=raw_rel["end_node_id"],
+            )
+        )
+    return relationships
+
+
+def _unique_items(items: list[Any]) -> list[Any]:
+    """Remove duplicate graph rows while preserving vector-rank order."""
+    unique: list[Any] = []
+    seen_chunk_ids: set[str] = set()
+    for item in items:
+        metadata = getattr(item, "metadata", None) or {}
+        chunk_id = metadata.get("chunk_id")
+        if not isinstance(chunk_id, str):
+            unique.append(item)
+            continue
+        if chunk_id in seen_chunk_ids:
+            continue
+        seen_chunk_ids.add(chunk_id)
+        unique.append(item)
+    return unique
+
+
+def _retrieval_query_text(request: QueryRequest) -> str:
+    """Disambiguate MuSiQue retrieval with titles from the selected record."""
+    if request.origin != "musique" or not request.paragraph_titles:
+        return request.question
+    unique_titles = list(dict.fromkeys(request.paragraph_titles))
+    question_terms = {
+        term.lower().strip("?.,:;()")
+        for term in request.question.split()
+        if len(term.strip("?.,:;()")) >= 4
+    }
+    specific_titles = [
+        title
+        for title in unique_titles
+        if "(" in title
+        and any(term in title.lower() for term in question_terms)
+    ]
+    if not specific_titles:
+        specific_titles = [title for title in unique_titles if "(" in title]
+    titles = "; ".join(specific_titles[:3] or unique_titles[:3])
+    return f"{request.question}\nRelevant source titles: {titles}"
 
 
 def retrieve(
@@ -245,17 +466,69 @@ def retrieve(
         RetrievalError: If the provider fails or returns malformed evidence.
     """
     settings = retrieval_settings or RetrievalSettings()
+    retrieval_query_text = _retrieval_query_text(request)
+    graph_query_params = (
+        {"node_limit": settings.max_graph_nodes, "query_limit": settings.max_graph_nodes + 1}
+        if settings.mode == "vector_cypher"
+        else None
+    )
     try:
-        raw_result = retriever.search(query_text=request.question, top_k=settings.top_k)
+        if settings.backend == "graphrag":
+            retriever_config: dict[str, Any] = {
+                "top_k": settings.candidate_k,
+            }
+            if request.record_id:
+                retriever_config["filters"] = {"record_id": request.record_id}
+            if graph_query_params is not None:
+                retriever_config["query_params"] = graph_query_params
+            raw_result = retriever.search(
+                query_text=retrieval_query_text,
+                retriever_config=retriever_config,
+                return_context=True,
+            )
+            retriever_result = getattr(raw_result, "retriever_result", None)
+            items = getattr(retriever_result, "items", None)
+            if items is None:
+                raise RetrievalError("GraphRAG response is missing retriever context")
+            if not items:
+                return RetrievalResult(
+                    trace_id=request.trace_id,
+                    question=request.question,
+                    mode="graphrag",
+                    evidence=[],
+                    backend="graphrag",
+                )
+            evidence = [_evidence_from_item(item) for item in _unique_items(items)[: settings.max_context_chunks]]
+            generated_answer = getattr(raw_result, "answer", None)
+            if not isinstance(generated_answer, str) or not generated_answer.strip():
+                raise RetrievalError("GraphRAG response is missing an answer")
+            return RetrievalResult(
+                trace_id=request.trace_id,
+                question=request.question,
+                mode="graphrag",
+                evidence=evidence,
+                backend="graphrag",
+                generated_answer=generated_answer,
+            )
+        search_kwargs: dict[str, Any] = {"top_k": settings.candidate_k}
+        if request.record_id:
+            search_kwargs["filters"] = {"record_id": request.record_id}
+        if graph_query_params is not None:
+            search_kwargs["query_params"] = graph_query_params
+        raw_result = retriever.search(query_text=retrieval_query_text, **search_kwargs)
     except Exception as error:  # noqa: BLE001 - expose provider failure at app boundary
         raise RetrievalError(f"GraphRAG retrieval failed: {error}") from error
     items = getattr(raw_result, "items", None)
     if items is None:
         raise RetrievalError("GraphRAG retrieval response is missing items")
-    evidence = [_evidence_from_item(item) for item in items[: settings.max_context_chunks]]
+    evidence = [
+        _evidence_from_item(item)
+        for item in _unique_items(items)[: settings.max_context_chunks]
+    ]
     return RetrievalResult(
         trace_id=request.trace_id,
         question=request.question,
         mode=settings.mode,
         evidence=evidence,
+        backend="vectorrag",
     )

@@ -43,6 +43,14 @@ from graphrag_pipeline.query import (
     select_queries,
 )
 from graphrag_pipeline.retrieval import RetrievalError, RetrievalResult, RetrievalSettings, build_retriever, retrieve
+from graphrag_pipeline.retrieval import (
+    RetrievalError,
+    RetrievalResult,
+    RetrievalSettings,
+    build_graphrag,
+    build_retriever,
+    retrieve,
+)
 from graphrag_pipeline.retrieval_prerequisites import verify_retrieval_prerequisites
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 
@@ -60,13 +68,18 @@ def _load_raw_record(dataset_paths: list[Path], record_id: str) -> dict[str, Any
     raise ValueError(f"record ID not found for correctness verification: {record_id}")
 
 
-def _empty_retrieval(request: QueryRequest, mode: str) -> RetrievalResult:
+def _empty_retrieval(
+    request: QueryRequest,
+    mode: str,
+    backend: str = "vectorrag",
+) -> RetrievalResult:
     """Create an empty retrieval result for a failed retrieval/answer stage."""
     return RetrievalResult(
         trace_id=request.trace_id,
         question=request.question,
         mode=mode,
         evidence=[],
+        backend=backend if backend in {"graphrag", "vectorrag"} else "vectorrag",
     )
 
 
@@ -81,6 +94,7 @@ def _failed_response(request: QueryRequest, mode: str, error: Exception) -> Quer
         source_file=request.source_file,
         source_line=request.source_line,
         preload=request.preload,
+        retrieval_backend=mode if mode in {"graphrag", "vectorrag"} else "vectorrag",
         retrieval_mode=mode,
         error=str(error),
     )
@@ -124,11 +138,19 @@ async def execute_queries(
             retrieval = retrieve(request, retriever, retrieval_settings=retrieval_settings)
             response = generate_answer(request, retrieval, llm)
         except RetrievalError as error:
-            retrieval = _empty_retrieval(request, retrieval_settings.mode)
-            response = _failed_response(request, retrieval_settings.mode, error)
+            retrieval = _empty_retrieval(
+                request,
+                retrieval_settings.mode,
+                retrieval_settings.backend,
+            )
+            response = _failed_response(request, retrieval_settings.backend, error)
         except Exception as error:  # noqa: BLE001 - command boundary returns structured failure
-            retrieval = _empty_retrieval(request, retrieval_settings.mode)
-            response = _failed_response(request, retrieval_settings.mode, error)
+            retrieval = _empty_retrieval(
+                request,
+                retrieval_settings.mode,
+                retrieval_settings.backend,
+            )
+            response = _failed_response(request, retrieval_settings.backend, error)
         retrievals[id(request)] = retrieval
 
         raw_record = None
@@ -144,7 +166,14 @@ async def execute_queries(
     )
     if artifact_path is not None:
         for index, (request, response) in enumerate(zip(requests, responses), start=1):
-            retrieval = retrievals.get(id(request), _empty_retrieval(request, retrieval_settings.mode))
+            retrieval = retrievals.get(
+                id(request),
+                _empty_retrieval(
+                    request,
+                    retrieval_settings.mode,
+                    retrieval_settings.backend,
+                ),
+            )
             raw_record = None
             if request.origin == "musique" and request.record_id and configured_paths:
                 raw_record = _load_raw_record(configured_paths, request.record_id)
@@ -194,15 +223,32 @@ def build_requests(args: argparse.Namespace) -> tuple[list[QueryRequest], list[P
     return requests, paths
 
 
+def _resolve_retrieval_mode(backend: str, mode: str | None) -> str:
+    """Default an unset retrieval mode from the selected backend.
+
+    An explicitly supplied mode is always honored, including a conflicting
+    one (which ``RetrievalSettings`` then rejects explicitly).
+    """
+    if mode is not None:
+        return mode
+    return "vector_cypher" if backend == "graphrag" else "vector"
+
+
 def run_cli(args: argparse.Namespace) -> list[QueryResponse]:
     """Construct live Neo4j/provider dependencies and execute the CLI request."""
     requests, dataset_paths = build_requests(args)
+    requests = [
+        request.model_copy(update={"retrieval_backend": args.retrieval_backend})
+        for request in requests
+    ]
     neo4j_settings = Neo4jSettings.from_env()
     model_settings = model_settings_from_env()
     retrieval_settings = RetrievalSettings(
-        mode=args.retrieval_mode,
+        backend=args.retrieval_backend,
+        mode=_resolve_retrieval_mode(args.retrieval_backend, args.retrieval_mode),
         top_k=args.top_k,
         max_context_chunks=args.max_context_chunks,
+        max_graph_nodes=args.max_graph_nodes,
     )
     connection = Neo4jConnection(neo4j_settings)
     connection.verify_connectivity()
@@ -212,13 +258,18 @@ def run_cli(args: argparse.Namespace) -> list[QueryResponse]:
             neo4j_settings,
             model_settings=model_settings,
         )
-    retriever = build_retriever(
+    vector_retriever = build_retriever(
         connection.connect(),
         neo4j_settings.database,
         model_settings,
         retrieval_settings=retrieval_settings,
     )
     llm = build_answer_llm(model_settings)
+    retriever = (
+        build_graphrag(vector_retriever, llm)
+        if args.retrieval_backend == "graphrag"
+        else vector_retriever
+    )
     try:
         return asyncio.run(
             execute_queries(
@@ -236,6 +287,7 @@ def run_cli(args: argparse.Namespace) -> list[QueryResponse]:
                     "llm_model": model_settings.llm_model,
                     "embedding_model": model_settings.embedding_model,
                     "embedding_dimensions": getattr(model_settings, "embedding_dimensions", None),
+                    "retrieval_backend": retrieval_settings.backend,
                 },
             )
         )
@@ -252,9 +304,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-path", action="append", help="JSONL source path; repeat for multiple files.")
     parser.add_argument("--max-records", type=int, help="Bound the selected MuSiQue batch.")
     parser.add_argument("--preload", action="store_true", help="Preload selected MuSiQue records before QA.")
-    parser.add_argument("--retrieval-mode", choices=("vector", "vector_cypher"), default="vector")
+    parser.add_argument("--retrieval-backend", choices=("graphrag", "vectorrag"), default="vectorrag")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=("vector", "vector_cypher"),
+        default=None,
+        help="Defaults to vector_cypher for --retrieval-backend graphrag, vector otherwise.",
+    )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--max-context-chunks", type=int, default=5)
+    parser.add_argument(
+        "--max-graph-nodes",
+        type=int,
+        default=200,
+        help="Resource budget for one seed chunk's entity-subgraph traversal (graphrag/vector_cypher only).",
+    )
     parser.add_argument("--artifact", type=Path, help="Write one JSON artifact per query (numbered for batches).")
     parser.add_argument("--progress", action="store_true")
     parser.add_argument("--skip-prerequisite-check", action="store_true", help=argparse.SUPPRESS)
