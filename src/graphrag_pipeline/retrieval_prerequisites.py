@@ -1,11 +1,13 @@
 """Verify Neo4j GraphRAG and vector-retrieval prerequisites.
 
-Last modified: 2026-10-06
+Last modified: 2026-10-17
 
 Purpose of this file:
     Check the read-only prerequisites required before GraphRAG retrieval:
     Neo4j connectivity/version, installed GraphRAG API, vector-index
-    configuration, and plugin-created graph content.
+    configuration, plugin-created graph content, and (for record-constrained
+    MuSiQue queries) that the index declares ``record_id`` filterable and every
+    queried record's chunks carry it.
 
 Files that use this file:
     The future retrieval command will run ``verify_retrieval_prerequisites``
@@ -15,7 +17,10 @@ Files that use this file:
 Caveats:
     This module does not create indexes, ingest data, retrieve evidence, or
     generate answers. It reports the installed API and validates an existing
-    index; live Neo4j state is required for a complete report.
+    index; live Neo4j state is required for a complete report. Filterable
+    properties are read from the index's ``properties`` (Neo4j 2026.x) as well as
+    ``vector.filterable_properties``. ``graphrag_pipeline.vector_index_setup``
+    repairs a missing filter declaration; this module only reports it.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import re
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Literal
@@ -48,6 +55,7 @@ class VectorIndexSettings:
     embedding_property: str = "embedding"
     dimensions: int | None = None
     similarity: Literal["cosine", "euclidean"] = "cosine"
+    filter_property: str = "record_id"
 
     @classmethod
     def from_env(cls) -> "VectorIndexSettings":
@@ -82,6 +90,7 @@ class RetrievalPrerequisiteReport:
     vector_index: dict[str, Any]
     graph: dict[str, Any]
     provenance: dict[str, Any] | None = None
+    record_filter: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the report as a JSON-serializable dictionary."""
@@ -174,7 +183,83 @@ def _verify_index(
         "embedding_property": settings.embedding_property,
         "dimensions": dimensions,
         "similarity": similarity or settings.similarity,
+        # Neo4j 2026.x lists filterable properties after the vector property.
+        "filterable_properties": sorted(
+            {
+                *(name for name in properties if name != settings.embedding_property),
+                *(config.get("vector.filterable_properties") or []),
+            }
+        ),
     }
+
+
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _verify_record_filter(
+    connection: Any,
+    settings: VectorIndexSettings,
+    index_report: dict[str, Any],
+    record_ids: Sequence[str],
+    require_record_filter: bool,
+) -> dict[str, Any]:
+    """Check that record-constrained retrieval can use the vector index.
+
+    Args:
+        connection: Object with ``run_read``.
+        settings: Index contract, including the filter property.
+        index_report: Result of ``_verify_index``.
+        record_ids: Records that already exist in the graph and will be queried
+            with a record filter (records about to be preloaded are excluded).
+        require_record_filter: Whether any query will apply a record filter.
+
+    Returns:
+        A report with ``state`` (``not_required`` or ``in_index``), the filter
+        property, whether the index declares it, and per-record chunk counts.
+
+    Raises:
+        RetrievalPrerequisiteError: If a filter is required but the index does
+            not declare the property, a requested record has no chunks, or some
+            of its chunks lack the property (they would be silently excluded).
+    """
+    prop = settings.filter_property
+    if not _IDENTIFIER.match(prop) or not _IDENTIFIER.match(settings.label):
+        raise RetrievalPrerequisiteError("vector index label and filter property must be simple identifiers")
+    declared = prop in index_report["filterable_properties"]
+    report: dict[str, Any] = {
+        "property": prop,
+        "index_declares_property": declared,
+        "state": "not_required",
+        "records": {},
+    }
+    if not (require_record_filter or record_ids):
+        return report
+    if not declared:
+        raise RetrievalPrerequisiteError(
+            f"record filtering needs {prop!r} declared filterable on vector index "
+            f"{settings.name!r}; run `python -m graphrag_pipeline.vector_index_setup --apply`"
+        )
+    for record_id in record_ids:
+        rows = connection.run_read(
+            f"MATCH (c:`{settings.label}`)-[:FROM_DOCUMENT]->(d:Document {{`{prop}`: $record_id}}) "
+            f"RETURN count(c) AS chunks, count(CASE WHEN c.`{prop}` = d.`{prop}` THEN 1 END) AS chunks_with_property",
+            {"record_id": record_id},
+        )
+        chunks = int(rows[0]["chunks"]) if rows else 0
+        with_property = int(rows[0]["chunks_with_property"]) if rows else 0
+        report["records"][record_id] = {"chunks": chunks, "chunks_with_property": with_property}
+        if chunks == 0:
+            raise RetrievalPrerequisiteError(
+                f"record {record_id!r} has no persisted chunks; preload it or check the record ID"
+            )
+        if with_property < chunks:
+            raise RetrievalPrerequisiteError(
+                f"{chunks - with_property} of {chunks} chunks for record {record_id!r} lack {prop!r} "
+                "and would be excluded by the filter; run "
+                "`python -m graphrag_pipeline.vector_index_setup --apply`"
+            )
+    report["state"] = "in_index"
+    return report
 
 
 def verify_retrieval_prerequisites(
@@ -185,6 +270,8 @@ def verify_retrieval_prerequisites(
     vector_index: VectorIndexSettings | None = None,
     chunk_id: str | None = None,
     record_id: str | None = None,
+    require_record_filter: bool = False,
+    record_ids: Sequence[str] = (),
 ) -> RetrievalPrerequisiteReport:
     """Verify Neo4j, GraphRAG, vector-index, graph, and optional provenance state.
 
@@ -195,6 +282,10 @@ def verify_retrieval_prerequisites(
         vector_index: Expected vector-index contract; loaded from environment when omitted.
         chunk_id: Optional persisted chunk to verify read-only.
         record_id: Optional MuSiQue record associated with ``chunk_id``.
+        require_record_filter: Whether any query will apply a record filter; the
+            index must then declare the filter property.
+        record_ids: Already-loaded records that will be queried with a record
+            filter; each must have chunks, all carrying the filter property.
 
     Returns:
         A machine-readable prerequisite report.
@@ -231,6 +322,14 @@ def verify_retrieval_prerequisites(
         raise RetrievalPrerequisiteError(f"Neo4j prerequisite check failed: {error}") from error
 
     index_report = _verify_index(connection, neo4j_settings, settings)
+    try:
+        record_filter = _verify_record_filter(
+            connection, settings, index_report, record_ids, require_record_filter
+        )
+    except RetrievalPrerequisiteError:
+        raise
+    except Exception as error:  # noqa: BLE001 - normalize database errors
+        raise RetrievalPrerequisiteError(f"record filter check failed: {error}") from error
     provenance = None
     if chunk_id is not None and record_id is not None:
         try:
@@ -257,6 +356,7 @@ def verify_retrieval_prerequisites(
         vector_index=index_report,
         graph=graph_rows[0],
         provenance=provenance,
+        record_filter=record_filter,
     )
 
 
@@ -265,6 +365,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--chunk-id", help="Optional persisted Chunk ID to verify.")
     parser.add_argument("--record-id", help="Optional MuSiQue record ID for --chunk-id.")
+    parser.add_argument(
+        "--filter-record-id",
+        action="append",
+        default=[],
+        help="Loaded MuSiQue record to check for record-filtered retrieval; repeatable.",
+    )
     args = parser.parse_args()
 
     from graphrag_pipeline.config import model_settings_from_env
@@ -279,6 +385,8 @@ def main() -> None:
             model_settings=model_settings_from_env(),
             chunk_id=args.chunk_id,
             record_id=args.record_id,
+            require_record_filter=bool(args.filter_record_id),
+            record_ids=args.filter_record_id,
         )
     except (RetrievalPrerequisiteError, ValueError) as error:
         print(json.dumps({"verified": False, "error": str(error)}, indent=2, sort_keys=True))

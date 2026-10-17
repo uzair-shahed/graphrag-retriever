@@ -41,6 +41,26 @@ verification command does not create or mutate indexes; it fails instead when
 the configured index is absent, not online, aimed at a different property,
 or configured with incompatible dimensions or similarity.
 
+#### Record-filtered retrieval (MuSiQue)
+
+A query with `--record-id` constrains vector search to that record through the
+vector index itself, which requires the index to declare `record_id` filterable
+and every `Chunk` to carry the `record_id` of its `Document`. `graphrag-query`
+checks both before running and stops with an explicit error if either is
+missing; it never falls back to filtering after the search. A graph loaded
+before this requirement existed is repaired with:
+
+```text
+python -m graphrag_pipeline.vector_index_setup          # report only
+python -m graphrag_pipeline.vector_index_setup --apply  # backfill + recreate
+```
+
+`--apply` drops and recreates the index with the same dimensions and similarity
+(embeddings are not recomputed), so vector search is unavailable until the new
+index is `ONLINE`. Records ingested with the current loader already carry
+`Chunk.record_id`. `retrieval_prerequisites --filter-record-id ID` reports the
+filter state for already-loaded records.
+
 ### GraphRAG and VectorRAG retrieval adapter
 
 The application retrieval boundary is in

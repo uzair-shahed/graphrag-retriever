@@ -40,6 +40,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import neo4j
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
 from neo4j_graphrag.generation.graphrag import GraphRAG
@@ -59,6 +60,57 @@ from graphrag_pipeline.retrieval_prerequisites import VectorIndexSettings
 
 class RetrievalError(RuntimeError):
     """Raised when Neo4j returns an unusable retrieval result or provider error."""
+
+
+class RecordFilterRetriever(VectorCypherRetriever):
+    """``VectorCypherRetriever`` that only filters through the vector index.
+
+    Neo4j 2026.x lists filterable properties after the vector property in the
+    index's ``properties`` (not in ``vector.filterable_properties``, which
+    neo4j-graphrag 1.21 reads), so the stock retriever never sees them and falls
+    back to a procedure path that is broken for ``VectorCypherRetriever``. This
+    subclass reads them from ``properties`` and rejects any filter on a property
+    the index does not declare, so a record constraint is never applied through
+    an unreported fallback.
+    """
+
+    def _fetch_index_infos(self, vector_index_name: str) -> None:
+        """Load index metadata and add the index's filterable properties."""
+        super()._fetch_index_infos(vector_index_name)
+        records = self.driver.execute_query(
+            "SHOW VECTOR INDEXES YIELD name, properties WHERE name = $index_name RETURN properties",
+            {"index_name": vector_index_name},
+            database_=self.neo4j_database,
+            routing_=neo4j.RoutingControl.READ,
+        ).records
+        indexed = list(records[0]["properties"]) if records else []
+        self._filterable_properties = sorted({*self._filterable_properties, *indexed[1:]})
+
+    def get_search_results(
+        self,
+        query_vector: list[float] | None = None,
+        query_text: str | None = None,
+        top_k: int = 5,
+        effective_search_ratio: int = 1,
+        query_params: dict[str, Any] | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> Any:
+        """Run vector search, refusing filters on properties the index lacks."""
+        if filters:
+            missing = sorted(set(filters) - set(self._filterable_properties))
+            if missing:
+                raise RetrievalError(
+                    f"vector index {self.index_name!r} does not declare {missing} as filterable; "
+                    "run `python -m graphrag_pipeline.vector_index_setup --apply`"
+                )
+        return super().get_search_results(
+            query_vector=query_vector,
+            query_text=query_text,
+            top_k=top_k,
+            effective_search_ratio=effective_search_ratio,
+            query_params=query_params,
+            filters=filters,
+        )
 
 
 # Relationship types that are lexical-graph/provenance infrastructure, not
@@ -289,7 +341,8 @@ def build_retriever(
             omitted. Deterministic tests pass an explicit list.
 
     Returns:
-        A configured ``VectorCypherRetriever``. A plain ``VectorRetriever``
+        A configured ``RecordFilterRetriever`` (a ``VectorCypherRetriever``).
+        A plain ``VectorRetriever``
         cannot be used: the vector-matched ``Chunk`` node does not carry the
         ``chunk_id``/``record_id`` provenance this application requires.
     """
@@ -304,7 +357,7 @@ def build_retriever(
         "result_formatter": _format_record,
     }
     if retrieval.mode == "vector":
-        return VectorCypherRetriever(**common, retrieval_query=_retrieval_query_vector())
+        return RecordFilterRetriever(**common, retrieval_query=_retrieval_query_vector())
     if retrieval.mode == "vector_cypher":
         if relationship_types is None:
             relationship_filter = _discover_relationship_allowlist(driver, neo4j_database)
@@ -317,7 +370,7 @@ def build_retriever(
                 }
             )
             relationship_filter = "|".join(["FROM_CHUNK<", *domain_types])
-        return VectorCypherRetriever(
+        return RecordFilterRetriever(
             **common,
             retrieval_query=_retrieval_query_vector_cypher(relationship_filter),
         )

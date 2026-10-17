@@ -207,7 +207,7 @@ def test_build_vector_retriever_uses_openrouter_embedder() -> None:
     """Vector mode uses VectorCypherRetriever with the Document-hop-only projection."""
     with (
         patch("graphrag_pipeline.retrieval.OpenAIEmbeddings") as embedder,
-        patch("graphrag_pipeline.retrieval.VectorCypherRetriever") as retriever,
+        patch("graphrag_pipeline.retrieval.RecordFilterRetriever") as retriever,
     ):
         build_retriever(
             MagicMock(),
@@ -238,7 +238,7 @@ def test_build_vector_cypher_retriever_uses_ollama_embedder() -> None:
     )
     with (
         patch("graphrag_pipeline.retrieval.OllamaEmbeddings") as embedder,
-        patch("graphrag_pipeline.retrieval.VectorCypherRetriever") as retriever,
+        patch("graphrag_pipeline.retrieval.RecordFilterRetriever") as retriever,
     ):
         build_retriever(
             MagicMock(),
@@ -273,7 +273,7 @@ def test_build_vector_cypher_retriever_discovers_relationship_types_from_driver(
     ]
     with (
         patch("graphrag_pipeline.retrieval.OllamaEmbeddings"),
-        patch("graphrag_pipeline.retrieval.VectorCypherRetriever") as retriever,
+        patch("graphrag_pipeline.retrieval.RecordFilterRetriever") as retriever,
     ):
         build_retriever(
             driver,
@@ -524,3 +524,60 @@ def test_graphrag_blank_answer_is_kept_for_contract_validation() -> None:
 
     assert result.generated_answer == ""
     assert [item.chunk_id for item in result.evidence] == ["chunk-1"]
+
+
+def bare_record_filter_retriever(filterable: list[str]):
+    """Build a RecordFilterRetriever without contacting Neo4j."""
+    from graphrag_pipeline.retrieval import RecordFilterRetriever
+
+    retriever = object.__new__(RecordFilterRetriever)
+    retriever.index_name = "chunk_embedding"
+    retriever._filterable_properties = filterable
+    return retriever
+
+
+def test_record_filter_retriever_rejects_filter_on_undeclared_property() -> None:
+    """A record filter is never applied through the library's silent fallback."""
+    retriever = bare_record_filter_retriever([])
+
+    with pytest.raises(RetrievalError, match="does not declare \\['record_id'\\] as filterable"):
+        retriever.get_search_results(query_vector=[0.1], filters={"record_id": "record-1"})
+
+
+def test_record_filter_retriever_delegates_declared_filter_to_the_index() -> None:
+    """A declared property is passed through to the stock in-index search."""
+    from neo4j_graphrag.retrievers import VectorCypherRetriever
+
+    retriever = bare_record_filter_retriever(["record_id"])
+
+    with patch.object(VectorCypherRetriever, "get_search_results", return_value="rows") as stock:
+        result = retriever.get_search_results(query_vector=[0.1], top_k=3, filters={"record_id": "record-1"})
+
+    assert result == "rows"
+    assert stock.call_args.kwargs["filters"] == {"record_id": "record-1"}
+    assert stock.call_args.kwargs["top_k"] == 3
+
+
+def test_record_filter_retriever_allows_unfiltered_search_without_declaration() -> None:
+    """Unconstrained queries need no filterable property."""
+    from neo4j_graphrag.retrievers import VectorCypherRetriever
+
+    retriever = bare_record_filter_retriever([])
+
+    with patch.object(VectorCypherRetriever, "get_search_results", return_value="rows"):
+        assert retriever.get_search_results(query_vector=[0.1]) == "rows"
+
+
+def test_record_filter_retriever_reads_filterable_properties_from_index_properties() -> None:
+    """Neo4j 2026.x lists filterable properties after the vector property."""
+    from neo4j_graphrag.retrievers import VectorCypherRetriever
+
+    retriever = bare_record_filter_retriever([])
+    retriever.neo4j_database = "neo4j"
+    retriever.driver = MagicMock()
+    retriever.driver.execute_query.return_value.records = [{"properties": ["embedding", "record_id"]}]
+
+    with patch.object(VectorCypherRetriever, "_fetch_index_infos"):
+        retriever._fetch_index_infos("chunk_embedding")
+
+    assert retriever._filterable_properties == ["record_id"]

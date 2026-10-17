@@ -247,6 +247,88 @@ evidence could silently differ from the artifact's retrieval evidence.
   `vector_cypher` mode; `vector` mode (the baseline) is unchanged.
 - The contract has no way for the model to say "insufficient evidence"; a
   model that cannot answer must still cite, or the response fails.
+- Observed live with `qwen3:4b` on a 3-hop MuSiQue record: the model wrote
+  prose followed by a fenced JSON block, which the strict contract rejects as
+  `failed` ("malformed JSON output") although the embedded JSON was valid.
+  This is the contract working as designed; a more compliant model or a
+  model-side JSON mode is the remedy, not a looser parser.
+
+### Task 4 — Index-aware MuSiQue record filtering (2026-10-17)
+
+**Status:** Implemented, tested, and verified live.
+
+**What was found:** Neo4j 2026.x records an index's filterable properties in
+its `properties` list (after the vector property), but neo4j-graphrag 1.21
+only reads `vector.filterable_properties`. The stock retriever therefore
+never recognised a filterable `record_id` and used a fallback path that is
+broken for `VectorCypherRetriever`. `Chunk` nodes also lacked `record_id`
+(it lived only on `Document`), so an index filter could not match them.
+
+**What was implemented:**
+
+- `retrieval.py`: `RecordFilterRetriever` (a `VectorCypherRetriever`) reads the
+  filterable properties from the index's `properties` and raises
+  `RetrievalError` for any filter on an undeclared property, so a record
+  constraint is never applied through an unreported fallback.
+  `build_retriever` now returns it for both modes.
+- `vector_index_setup.py` (new): `python -m graphrag_pipeline.vector_index_setup`
+  reports, and with `--apply` repairs, the two requirements: it backfills
+  `Chunk.record_id` from `Document` and recreates the vector index with the
+  existing dimensions and similarity plus `record_id` filterable. Without
+  `--apply` it changes nothing; repeated `--apply` is a no-op.
+- `retrieval_prerequisites.py`: the report gains `vector_index.filterable_properties`
+  and a `record_filter` section (`not_required` or `in_index`, whether the index
+  declares the property, per-record chunk counts). Verification fails early
+  when a filter is required but undeclared, a requested record has no chunks,
+  or some of its chunks lack `record_id` (they would be silently excluded).
+  There is no degraded mode: the supported fallback was judged unreliable, so
+  the state is fail-fast. `--filter-record-id` checks loaded records from the
+  command line.
+- `query_command.py`: record-constrained runs require the filter; records
+  about to be preloaded are excluded from the chunk-coverage check because
+  they have no chunks yet.
+- The live index was repaired with the setup command and now reports
+  `filterable_properties: ["record_id"]`.
+
+**Tests:**
+
+- `tests/unit/test_vector_index_setup.py`: index parsing (both metadata
+  locations), report-only mode changes nothing, `--apply` backfills and
+  recreates preserving dimensions, no recreation when already filterable, and
+  unsafe identifiers are rejected.
+- `tests/unit/test_retrieval_prerequisites.py`: supported, declared-through-
+  config, missing-from-index (fails when required, reported when not),
+  partial `Chunk.record_id` coverage, record without chunks, and unsafe
+  identifier cases.
+- `tests/unit/test_retrieval.py`: the retriever rejects undeclared filters,
+  delegates declared ones to the index, allows unfiltered search, and reads
+  filterable properties from `properties`.
+- `tests/integration/test_record_filtered_vector_search.py` (live Neo4j,
+  temporary labelled fixtures): the filter uses the index and excludes nearer
+  records from other records, filtered top-k is filled from the requested
+  record only even when unrelated records hold near-identical text, and an
+  index without the declaration fails instead of falling back.
+- Live: a record-constrained GraphRAG query on `3hop2__90098_156850_10557`
+  retrieved only that record's chunks (paragraphs 3, 15, 10; two of the three
+  gold supporting paragraphs). Full suite: 185 passed.
+
+**Measurements (live graph, 2 records, 35 chunks, 15 runs, median):**
+
+- Latency: in-index filtered search 2.4 ms versus unfiltered search with a
+  top-20 over-fetch and filtering afterwards 2.6 ms; no meaningful difference
+  at this scale. The benefit is expected to appear only with many records.
+- Candidate behavior: asking for 5 results, filtering after an unfiltered
+  top-5 returned 4/5 chunks from the target record for one question because
+  another record's chunk ranked inside the top 5; it needed k=10 to recover
+  5/5. In-index filtering returned 5/5 for both questions.
+
+**Caveats:**
+
+- Recreating the index makes vector search unavailable until it is `ONLINE`;
+  the setup command waits for it but is not safe to run during queries.
+- The measurements use two records. They show candidate correctness, not
+  large-corpus latency; Task 7 should re-measure on the evaluation set.
+- Corpus-wide (unfiltered) retrieval is unaffected and needs no declaration.
 
 ## Goal
 

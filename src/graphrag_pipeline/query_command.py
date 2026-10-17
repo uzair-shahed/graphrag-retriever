@@ -265,6 +265,11 @@ def run_cli(args: argparse.Namespace) -> list[QueryResponse]:
             connection,
             neo4j_settings,
             model_settings=model_settings,
+            require_record_filter=any(request.record_id for request in requests),
+            # A record about to be preloaded has no chunks yet to inspect.
+            record_ids=sorted(
+                {request.record_id for request in requests if request.record_id and not request.preload}
+            ),
         )
     vector_retriever = build_retriever(
         connection.connect(),
