@@ -140,19 +140,28 @@ receives both the generated answer and the retriever context, then normalizes
 that context into `EvidenceChunk` values and uses the returned chunk IDs as
 citations. The application does not make a second answer-model call.
 
-In this project, GraphRAG still begins with vector similarity. The graph
-structure is available through the Neo4j retriever, but the configured
-retrieval query currently returns the matched chunk properties; it does not
-perform a custom multi-hop Cypher traversal for every question.
+In this project, GraphRAG begins with vector similarity over `Chunk` nodes.
+Its `VectorCypherRetriever` query resolves source provenance through the
+`FROM_DOCUMENT` relationship, then calls `apoc.path.subgraphAll` to traverse
+the seed chunk's associated entity subgraph with no hop-depth ceiling. The
+relationship filter is discovered from the live graph and excludes structural
+relationships that could leave the seed subgraph. `--max-graph-nodes` is a
+resource budget; evidence is marked incomplete if that budget prevents
+returning the full component. This is a per-seed-chunk entity subgraph, not a
+traversal that merges separate paragraph components across a whole MuSiQue
+record. The graph nodes and relationships are preserved in evidence, while
+Neo4j's managed answer prompt sees the retrieved chunk text rather than those
+structured graph fields.
 
 #### VectorRAG path
 
 With `--retrieval-backend vectorrag`, the application calls
-`VectorRetriever` or `VectorCypherRetriever` directly. It receives the
-retrieved chunks but does not ask that retriever to generate an answer. The
-local answer boundary then builds a prompt containing the original question
-and bounded evidence, calls the configured LLM, parses its JSON response, and
-checks that every citation refers to a returned chunk.
+`VectorCypherRetriever` directly. In `vector` mode it resolves chunk
+provenance without entity expansion; in `vector_cypher` mode it also returns
+the seed-associated entity subgraph. It does not ask the retriever to generate
+an answer. The local answer boundary builds a prompt containing the original
+question and bounded chunk evidence, calls the configured LLM, parses its JSON
+response, and checks that every citation refers to a returned chunk.
 
 The practical difference is therefore the answer boundary: GraphRAG owns both
 retrieval and answer generation, while VectorRAG separates those responsibilities
@@ -237,11 +246,120 @@ each selected MuSiQue record. Without it, no ingestion or re-extraction is
 performed.
 
 Retrieval is bounded with `--retrieval-backend vectorrag|graphrag`,
-`--retrieval-mode vector|vector_cypher` (the mode applies to VectorRAG),
-`--top-k`, and `--max-context-chunks`. The command verifies Neo4j retrieval
-prerequisites before execution, then uses the selected backend, shared answer
-contract, MuSiQue correctness verifier, and artifact writer. A missing graph,
-provider failure, malformed answer, or missing citation produces a nonzero exit
-status and does not become a successful answer. Required environment settings
-are documented in `.env.example`; both backends require a reachable Neo4j
-database and a verified vector index.
+`--retrieval-mode vector|vector_cypher`, `--top-k`, and
+`--max-context-chunks`. GraphRAG requires `vector_cypher`; VectorRAG supports
+either mode. The command verifies Neo4j retrieval prerequisites before
+execution, then uses the selected backend, shared answer contract, MuSiQue
+correctness verifier, and artifact writer. A missing graph, provider failure,
+malformed answer, or missing citation produces a nonzero exit status and does
+not become a successful answer. Required environment settings are documented
+in `.env.example`; both backends require a reachable Neo4j database and a
+verified vector index.
+
+### MuSiQue ingestion and query command reference
+
+Run commands from the repository root. The examples use the locked project
+environment; if it is already active, the corresponding `python -m ...`
+invocations work too.
+
+#### Load a bounded number of records
+
+The batch loader reads a contiguous range of records by 1-indexed position in
+the JSONL file. It loads every paragraph from each selected record; even a few
+records can trigger many extraction and embedding calls. Start with `--dry-run`
+to inspect the planned work before a live load.
+
+```sh
+# Plan the first three records without Neo4j or model-provider calls.
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
+    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+    --records 3 \
+    --dry-run
+
+# Load records 4, 5, and 6 into the configured Neo4j database.
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
+    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+    --records 3 \
+    --start-record 4
+```
+
+Loader options:
+
+| Flag | Required / default | Meaning |
+| --- | --- | --- |
+| `--dataset-path PATH` | Default: `dataset/musique/data/data/musique_full_v1.0_dev.jsonl` | Input MuSiQue JSONL file. |
+| `--records N` | Required | Number of consecutive records to plan or load. |
+| `--start-record N` | Default: `1` | 1-indexed starting record position in the file. |
+| `--source-split LABEL` | Derived from filename | Override the dataset split label stored as provenance. |
+| `--dry-run` | Off | Validate and count planned chunks without connecting to Neo4j or OpenRouter. |
+| `--no-progress` | Progress enabled | Disable the progress bar during live ingestion. |
+| `-h`, `--help` | N/A | Show command help. |
+
+The loader reports records and chunks planned, succeeded, and failed, plus
+dead-lettered records. It exits nonzero when records are invalid or chunks fail.
+`--dry-run` is not a preload: it does not write data. The live loader can incur
+provider cost and writes to Neo4j. Run retrieval prerequisites and ensure the
+vector index is online after ingestion.
+
+#### Query or preload selected records
+
+The QA command can accept either a custom `--question` or a MuSiQue
+`--record-id`. These selectors are mutually exclusive. A record query reads the
+stored question and provenance from the dataset JSONL; provide `--dataset-path`
+one or more times, or configure `GRAPH_RAG_DATASET_PATHS` in `.env`.
+
+```sh
+# Query one existing MuSiQue record without ingesting it.
+uv run --locked graphrag-query \
+    --record-id UNIQUE_RECORD_ID \
+    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+    --retrieval-backend graphrag \
+    --artifact runs/record-query.json
+
+# Preload that selected record first, then query it and write an artifact.
+uv run --locked graphrag-query \
+    --record-id UNIQUE_RECORD_ID \
+    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+    --preload \
+    --retrieval-backend graphrag \
+    --top-k 8 \
+    --max-context-chunks 3 \
+    --artifact runs/record-preloaded-query.json
+
+# Query at most two selected records; artifacts are numbered per query.
+uv run --locked graphrag-query \
+    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+    --max-records 2 \
+    --retrieval-backend vectorrag \
+    --artifact runs/two-records.json
+```
+
+Query options:
+
+| Flag | Required / default | Meaning |
+| --- | --- | --- |
+| `--question TEXT` | One of `--question` or `--record-id` | Run an external custom question; it has no MuSiQue record provenance and cannot be preloaded. |
+| `--record-id ID` | One of `--question` or `--record-id` | Select the stored question for this exact MuSiQue ID from the supplied dataset files. The ID must be unique across those files. |
+| `--dataset-path PATH` | `GRAPH_RAG_DATASET_PATHS` if omitted | JSONL dataset path; repeat the flag to search multiple files. |
+| `--max-records N` | No limit | Bound a selected MuSiQue batch when `--record-id` is omitted. |
+| `--preload` | Off | Ingest each selected MuSiQue record before its query. This writes to Neo4j and may make many provider calls; it requires a record-backed selection. |
+| `--retrieval-backend {vectorrag,graphrag}` | `vectorrag` | Select vector-only-answering (`vectorrag`) or managed retrieval-plus-answering (`graphrag`). |
+| `--retrieval-mode {vector,vector_cypher}` | `vector` for VectorRAG; `vector_cypher` for GraphRAG | Select whether retrieval expands each seed into its entity subgraph. GraphRAG requires `vector_cypher`. |
+| `--top-k N` | `5` | Vector seed/result count. Managed GraphRAG caps seed count at `min(top_k, max_context_chunks)` to keep answer and evidence bounds aligned. |
+| `--max-context-chunks N` | `5` | Maximum distinct source chunks retained as answer evidence. |
+| `--max-graph-nodes N` | `200` | Per-seed graph traversal resource budget in `vector_cypher` mode; it is not a hop limit. An exhausted budget must be represented as incomplete component evidence. |
+| `--artifact PATH` | No artifact | Write a JSON run artifact; a multi-query run writes numbered sibling files. |
+| `--progress` | Off | Show progress for requested preloading. |
+| `-h`, `--help` | N/A | Show command help. |
+
+If a record ID occurs more than once across the selected files, selection fails
+as ambiguous rather than choosing an occurrence. Select a source file with a
+unique ID or make a one-record JSONL input containing the intended occurrence.
+The command does not preload unless `--preload` is explicitly present. A
+successful response with `preload: true` indicates preloading was requested and
+completed sufficiently for QA to proceed; inspect the live loader output for
+the chunk-level counts and failures.
+
+The hidden `--skip-prerequisite-check` option is intended only for internal
+testing and is deliberately omitted from the public flag list. Normal runs
+should leave prerequisite checks enabled.

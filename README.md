@@ -113,7 +113,8 @@ The official dataset is not included in a clone. See
 [dataset/README.md](dataset/README.md) for acquisition instructions and the
 expected location. Once downloaded, you can extract a bounded set of records
 into Neo4j. Start with a dry run to validate the JSONL path and inspect how many
-paragraph chunks will be processed:
+paragraph chunks will be processed. `--records` is required and counts records;
+`--start-record` is the 1-indexed starting position (default `1`):
 
 ```sh
 uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
@@ -131,16 +132,33 @@ uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
    --records 1
 ```
 
-Each record typically contains about 20 paragraphs. The live command builds a
-Neo4j GraphRAG pipeline for each paragraph, which creates chunk embeddings and
-extracts entities and relationships; this can make many provider calls and
-incur charges. Increase `--records` gradually, and use `--start-record N` to
-choose the first 1-indexed record. The loader reports failed chunks and exits
-nonzero if extraction failures or invalid records occurred. After loading,
-create or verify the vector index as described in the live workflow above.
+To load three records starting with the fourth record, use `--records 3` and
+`--start-record 4`. Dry-run that batch first with:
 
-To query a record from the downloaded file, set `GRAPH_RAG_DATASET_PATHS` in
-`.env` to that JSONL path and select its ID with `graphrag-query --record-id`.
+```sh
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
+   --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
+   --records 3 \
+   --start-record 4 \
+   --dry-run
+```
+
+The loader also supports `--source-split LABEL` to override the provenance
+split inferred from the filename and `--no-progress` to disable the live
+progress bar. `--dry-run` validates and counts work without Neo4j or provider
+calls. The live command builds a Neo4j GraphRAG pipeline for each paragraph,
+which creates chunk embeddings and extracts entities and relationships; this
+can make many provider calls and incur charges. The loader reports failed
+chunks and exits nonzero if extraction failures or invalid records occurred.
+After loading, create or verify the vector index as described in the live
+workflow above.
+
+To query a record from the downloaded file, pass `--dataset-path` and
+`--record-id` to `graphrag-query`; add `--preload` only when that selected
+record should be ingested immediately before querying. The record ID must be
+unique across the supplied dataset files. See the
+[operational guide](documentation.md#musique-ingestion-and-query-command-reference)
+for the complete query-command flag reference and more examples.
 
 ## Further Documentation
 
