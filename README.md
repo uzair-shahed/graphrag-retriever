@@ -116,15 +116,36 @@ baseline, not a guarantee for every Neo4j release.
    # NOTE: The 1536 embedding should be 768 for Ollama and 1536 for OpenRouter depending on the embedding model being used.
    ```
 
-   Wait for the index to become `ONLINE`. The pipeline verifies the index; it
-   does not create it.
+   Wait for the index to become `ONLINE`. The pipeline verifies the base
+   index; it does not create it. This is sufficient for corpus-wide queries.
+   For MuSiQue queries constrained with `--record-id`, follow the record-filter
+   setup below. You do not need to create a second index or manually add its
+   filterable property; the setup command upgrades this index.
 5. Verify the live prerequisites:
 
    ```sh
    uv run --locked python -m graphrag_pipeline.retrieval_prerequisites
    ```
 
-6. Submit a custom question and write a local artifact:
+6. Before the first `--record-id` query, ensure the base `chunk_embedding` index
+exists, then run this once against the configured Neo4j database:
+
+```sh
+uv run --locked python -m graphrag_pipeline.vector_index_setup --apply
+```
+
+This command copies `record_id` from `Document` onto existing `Chunk` nodes
+when needed, then drops and recreates the existing vector index with `record_id`
+declared as filterable while preserving its dimensions and similarity setting.
+No separate index or manual Cypher change is required. Recreating the index
+temporarily makes vector search unavailable; wait for the command to finish and
+verify the index is `ONLINE` before querying. Running the command again is safe
+and does not recreate an index that is already configured correctly. Newly
+ingested chunks receive `record_id` during ingestion, but the index still needs
+the filterable-property upgrade before record-constrained queries.
+
+
+7. Submit a custom question and write a local artifact:
 
    ```sh
    uv run --locked graphrag-query --question "What company did Aster Systems acquire in 2021?" --artifact runs/smoke.json
@@ -164,12 +185,28 @@ uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --dat
 The loader also supports `--source-split LABEL` to override the provenance
 split inferred from the filename and `--no-progress` to disable the live
 progress bar. `--dry-run` validates and counts work without Neo4j or provider
-calls. The live command builds a Neo4j GraphRAG pipeline for each paragraph,
-which creates chunk embeddings and extracts entities and relationships; this
+calls. The live command reuses a Neo4j GraphRAG pipeline across paragraphs,
+creating chunk embeddings and extracting entities and relationships; this
 can make many provider calls and incur charges. The loader reports failed
 chunks and exits nonzero if extraction failures or invalid records occurred.
 After loading, create or verify the vector index as described in the live
 workflow above.
+
+Live ingestion resumes automatically. Progress is saved after each chunk in
+`runs/ingestion-state/<split>-<dataset-sha256-prefix>.json`. Repeat the same
+command after a stop: the loader checks Neo4j, skips matching complete chunks
+without provider calls, and processes pending work. A record is loaded only
+after every expected paragraph has been verified.
+
+Press Ctrl-C once to finish the current chunk and exit with code `130`; wait
+for the JSON summary. A second Ctrl-C interrupts immediately, leaving the
+in-flight chunk for reconciliation on resume. `--manifest-path PATH` overrides
+the state file; `--fresh-manifest` moves existing state aside and starts a new
+manifest while still reconciling Neo4j. A changed source checksum or split
+cannot reuse the old manifest silently. Keep ingestion sequential: concurrent
+writer protection and a durable failed-chunk retry queue are separate tasks.
+See [resume and recovery details](documentation.md#resume-stop-and-local-state)
+for state lifecycle, partial/conflicting data, limitations, and exit codes.
 
 To query a record from the downloaded file, pass `--dataset-path` and
 `--record-id` to `graphrag-query`; add `--preload` only when that selected
@@ -178,10 +215,22 @@ unique across the supplied dataset files. See the
 [operational guide](documentation.md#musique-ingestion-and-query-command-reference)
 for the complete query-command flag reference and more examples.
 
-Before using `--record-id` on a graph with the basic vector index created
-above, run `uv run --locked python -m graphrag_pipeline.vector_index_setup --apply`
-to backfill chunk provenance and recreate the index with `record_id`
-filter support. The index is unavailable until Neo4j reports it `ONLINE`.
+Before the first `--record-id` query, ensure the base `chunk_embedding` index
+exists, then run this once against the configured Neo4j database:
+
+```sh
+uv run --locked python -m graphrag_pipeline.vector_index_setup --apply
+```
+
+This command copies `record_id` from `Document` onto existing `Chunk` nodes
+when needed, then drops and recreates the existing vector index with `record_id`
+declared as filterable while preserving its dimensions and similarity setting.
+No separate index or manual Cypher change is required. Recreating the index
+temporarily makes vector search unavailable; wait for the command to finish and
+verify the index is `ONLINE` before querying. Running the command again is safe
+and does not recreate an index that is already configured correctly. Newly
+ingested chunks receive `record_id` during ingestion, but the index still needs
+the filterable-property upgrade before record-constrained queries.
 
 ## Further Documentation
 

@@ -77,6 +77,14 @@ def test_preload_uses_selected_record_and_preserves_provenance(tmp_path: Path) -
     assert summary.requested_records[0]["source_line"] == 3
 
 
+async def fake_run_requests(requests, *_args, store=None, **_kwargs):
+    """Stand in for the runner: persist every chunk as verified via the store."""
+    store.register(requests)
+    for request in requests:
+        store.for_request(request).mark_verified(request.chunk_id)
+    return [{"chunk_id": "chunk-1"}], []
+
+
 def test_live_selected_preload_reuses_existing_request_runner(tmp_path: Path) -> None:
     """Live selected loading delegates chunks to the established runner."""
     dataset = tmp_path / "records.jsonl"
@@ -85,7 +93,7 @@ def test_live_selected_preload_reuses_existing_request_runner(tmp_path: Path) ->
 
     with patch(
         "graphrag_pipeline.ingestion.load_musique_dataset.run_requests",
-        new=AsyncMock(return_value=([{"chunk_id": "chunk-1"}], [])),
+        new=AsyncMock(side_effect=fake_run_requests),
     ) as run_requests:
         summary = asyncio.run(
             load_selected_records(
@@ -93,6 +101,7 @@ def test_live_selected_preload_reuses_existing_request_runner(tmp_path: Path) ->
                 neo4j_settings=SimpleNamespace(),
                 openrouter_settings=SimpleNamespace(),
                 show_progress=False,
+                state_dir=tmp_path / "state",
             )
         )
 

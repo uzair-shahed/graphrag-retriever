@@ -21,10 +21,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from tqdm import tqdm
 
@@ -36,6 +37,12 @@ from graphrag_pipeline.diagnostics import (
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
+from graphrag_pipeline.ingestion.progress_manifest import (
+    DEFAULT_STATE_DIR,
+    ManifestError,
+    ManifestStore,
+)
+from graphrag_pipeline.ingestion.reconcile import COMPLETE, CONFLICT, PARTIAL, classify_chunk
 from graphrag_pipeline.ingestion.record_adapter import (
     RecordAdapterError,
     build_requests_for_record,
@@ -68,6 +75,22 @@ class LoadSummary:
     collect_seconds: float = 0.0
     run_seconds: float = 0.0
     elapsed_seconds: float = 0.0
+    chunks_skipped_verified: int = 0
+    chunks_needs_investigation: list[dict[str, Any]] = field(default_factory=list)
+    interrupted_in_flight: list[str] = field(default_factory=list)
+    stopped_early: bool = False
+    chunks_not_attempted: int = 0
+    manifest_paths: list[str] = field(default_factory=list)
+
+    @property
+    def succeeded(self) -> bool:
+        """Return whether every planned chunk was loaded and verified."""
+        return not (
+            self.dead_lettered_records
+            or self.chunks_failed
+            or self.chunks_needs_investigation
+            or self.stopped_early
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -80,7 +103,13 @@ class LoadSummary:
             "records_loaded": self.records_succeeded,
             "chunks_planned": self.chunks_planned,
             "chunks_succeeded": len(self.chunks_succeeded),
+            "chunks_skipped_already_verified": self.chunks_skipped_verified,
             "chunks_failed": len(self.chunks_failed),
+            "chunks_needs_investigation": self.chunks_needs_investigation,
+            "interrupted_in_flight_chunks": self.interrupted_in_flight,
+            "stopped_early": self.stopped_early,
+            "chunks_not_attempted": self.chunks_not_attempted,
+            "manifest_paths": self.manifest_paths,
             "dead_lettered_records": self.dead_lettered_records,
             "failed_chunks": self.chunks_failed,
             "collect_seconds": round(self.collect_seconds, 3),
@@ -104,11 +133,22 @@ class PreloadSummary:
     collect_seconds: float = 0.0
     run_seconds: float = 0.0
     elapsed_seconds: float = 0.0
+    chunks_skipped_verified: int = 0
+    chunks_needs_investigation: list[dict[str, Any]] = field(default_factory=list)
+    interrupted_in_flight: list[str] = field(default_factory=list)
+    stopped_early: bool = False
+    chunks_not_attempted: int = 0
+    manifest_paths: list[str] = field(default_factory=list)
 
     @property
     def succeeded(self) -> bool:
         """Return whether every selected record was loaded successfully."""
-        return not self.dead_lettered_records and not self.chunks_failed
+        return not (
+            self.dead_lettered_records
+            or self.chunks_failed
+            or self.chunks_needs_investigation
+            or self.stopped_early
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Return an audit-friendly representation of the preload outcome."""
@@ -118,7 +158,13 @@ class PreloadSummary:
             "records_loaded": self.records_succeeded,
             "chunks_planned": self.chunks_planned,
             "chunks_succeeded": len(self.chunks_succeeded),
+            "chunks_skipped_already_verified": self.chunks_skipped_verified,
             "chunks_failed": self.chunks_failed,
+            "chunks_needs_investigation": self.chunks_needs_investigation,
+            "interrupted_in_flight_chunks": self.interrupted_in_flight,
+            "stopped_early": self.stopped_early,
+            "chunks_not_attempted": self.chunks_not_attempted,
+            "manifest_paths": self.manifest_paths,
             "dead_lettered_records": self.dead_lettered_records,
             "collect_seconds": round(self.collect_seconds, 3),
             "run_seconds": round(self.run_seconds, 3),
@@ -298,11 +344,25 @@ def collect_selected_requests(
     return requests, dead_letters, len(selected_requests)
 
 
+@dataclass
+class RunOutcome:
+    """Resume-related outcome details filled in by ``run_requests``."""
+
+    skipped_verified: list[str] = field(default_factory=list)
+    needs_investigation: list[dict[str, Any]] = field(default_factory=list)
+    interrupted_in_flight: list[str] = field(default_factory=list)
+    stopped_early: bool = False
+    not_attempted: int = 0
+
+
 async def run_requests(
     requests: list[ExtractionRequest],
     neo4j_settings: Neo4jSettings,
     openrouter_settings: object,
     show_progress: bool = True,
+    store: ManifestStore | None = None,
+    stop_requested: Callable[[], bool] | None = None,
+    outcome: RunOutcome | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Send every validated chunk request through the live pipeline in order.
 
@@ -314,13 +374,27 @@ async def run_requests(
     postfix, how many records have already had every one of their chunks
     succeed. This assumes ``requests`` groups each record's chunks together,
     which is how ``collect_requests`` builds the list.
+
+    When ``store`` is supplied, progress is persisted and resumed: each chunk
+    is first reconciled against Neo4j (``complete`` chunks are skipped without
+    provider work, ``partial``/``conflict`` chunks are reported and skipped),
+    the chunk is flushed as ``in_flight`` before the pipeline call, and it is
+    marked ``verified`` only after its Neo4j state classifies as ``complete``.
+    ``stop_requested`` is polled before starting each chunk so a clean stop
+    never abandons a chunk that is already running.
     """
+    outcome = outcome if outcome is not None else RunOutcome()
     succeeded: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     total_records = len({request.record_id for request in requests})
     records_loaded = 0
     current_record_id: str | None = None
     current_record_failed = False
+
+    if store is not None:
+        store.register(requests)
+        for manifest in store.manifests():
+            outcome.interrupted_in_flight.extend(manifest.interrupted_in_flight)
 
     connection = Neo4jConnection(neo4j_settings)
     try:
@@ -333,17 +407,47 @@ async def run_requests(
             disable=not show_progress,
         )
         try:
-            for request in requests:
+            for index, request in enumerate(requests):
+                if stop_requested is not None and stop_requested():
+                    outcome.stopped_early = True
+                    outcome.not_attempted = len(requests) - index
+                    break
+
                 if request.record_id != current_record_id:
                     if current_record_id is not None and not current_record_failed:
                         records_loaded += 1
                     current_record_id = request.record_id
                     current_record_failed = False
 
+                manifest = store.for_request(request) if store is not None else None
+
+                if manifest is not None:
+                    state = classify_chunk(connection, request)
+                    if state.state == COMPLETE:
+                        manifest.mark_verified(request.chunk_id)
+                        outcome.skipped_verified.append(request.chunk_id)
+                        progress.update(1)
+                        continue
+                    if state.state in (PARTIAL, CONFLICT):
+                        report = state.to_report(request)
+                        manifest.mark_needs_investigation(request.chunk_id, report)
+                        outcome.needs_investigation.append(report)
+                        current_record_failed = True
+                        progress.update(1)
+                        progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
+                        continue
+                    manifest.mark_in_flight(request.chunk_id)
+
                 text, document_metadata = build_plugin_input(request)
                 try:
                     result = await pipeline.run_async(text=text, document_metadata=document_metadata)
                     synchronize_chunk_provenance(connection, request.chunk_id)
+                    if manifest is not None:
+                        written = classify_chunk(connection, request)
+                        if written.state != COMPLETE:
+                            raise RuntimeError(
+                                f"post-write Neo4j verification failed ({written.state}): {written.reason}"
+                            )
                 except Exception as error:  # noqa: BLE001 - recorded, not swallowed
                     current_record_failed = True
                     failure = {
@@ -360,7 +464,11 @@ async def run_requests(
                         if response_path is not None:
                             failure["invalid_llm_response"] = response_path.as_posix()
                     failed.append(failure)
+                    if manifest is not None:
+                        manifest.mark_failed(request.chunk_id, failure)
                 else:
+                    if manifest is not None:
+                        manifest.mark_verified(request.chunk_id)
                     succeeded.append(
                         {
                             "chunk_id": request.chunk_id,
@@ -371,9 +479,10 @@ async def run_requests(
                 progress.update(1)
                 progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
 
-            if current_record_id is not None and not current_record_failed:
-                records_loaded += 1
-                progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
+            else:
+                if current_record_id is not None and not current_record_failed:
+                    records_loaded += 1
+                    progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
         finally:
             progress.close()
     finally:
@@ -398,6 +507,10 @@ async def load_dataset(
     source_split: str | None,
     dry_run: bool,
     show_progress: bool = True,
+    manifest_path: Path | None = None,
+    state_dir: Path = DEFAULT_STATE_DIR,
+    fresh_manifest: bool = False,
+    stop_requested: Callable[[], bool] | None = None,
 ) -> LoadSummary:
     """Adapt, and unless ``dry_run``, run a bounded slice of a MuSiQue file."""
     started_at = time.perf_counter()
@@ -427,18 +540,42 @@ async def load_dataset(
 
     neo4j_settings = Neo4jSettings.from_env()
     model_settings = model_settings_from_env()
+    store = ManifestStore(manifest_path=manifest_path, state_dir=state_dir, fresh=fresh_manifest)
+    outcome = RunOutcome()
 
     run_started_at = time.perf_counter()
     succeeded, failed = await run_requests(
-        requests, neo4j_settings, model_settings, show_progress=show_progress
+        requests,
+        neo4j_settings,
+        model_settings,
+        show_progress=show_progress,
+        store=store,
+        stop_requested=stop_requested,
+        outcome=outcome,
     )
     summary.run_seconds = measure_duration_seconds(run_started_at)
 
     summary.chunks_succeeded = succeeded
     summary.chunks_failed = failed
-    summary.records_succeeded = count_fully_succeeded_records(requests, failed)
+    _apply_outcome(summary, outcome, store, requests)
     summary.elapsed_seconds = measure_duration_seconds(started_at)
     return summary
+
+
+def _apply_outcome(
+    summary: LoadSummary | PreloadSummary,
+    outcome: RunOutcome,
+    store: ManifestStore,
+    requests: list[ExtractionRequest],
+) -> None:
+    """Copy resume details and manifest-derived record completion into a summary."""
+    summary.chunks_skipped_verified = len(outcome.skipped_verified)
+    summary.chunks_needs_investigation = outcome.needs_investigation
+    summary.interrupted_in_flight = outcome.interrupted_in_flight
+    summary.stopped_early = outcome.stopped_early
+    summary.chunks_not_attempted = outcome.not_attempted
+    summary.manifest_paths = [str(manifest.path) for manifest in store.manifests()]
+    summary.records_succeeded = len(store.complete_record_ids(requests))
 
 
 async def load_selected_records(
@@ -448,6 +585,8 @@ async def load_selected_records(
     show_progress: bool = True,
     neo4j_settings: Neo4jSettings | None = None,
     openrouter_settings: object | None = None,
+    manifest_path: Path | None = None,
+    state_dir: Path = DEFAULT_STATE_DIR,
 ) -> PreloadSummary:
     """Preload selected MuSiQue records through the existing ingestion path.
 
@@ -489,17 +628,21 @@ async def load_selected_records(
 
     resolved_neo4j_settings = neo4j_settings or Neo4jSettings.from_env()
     resolved_model_settings = openrouter_settings or model_settings_from_env()
+    store = ManifestStore(manifest_path=manifest_path, state_dir=state_dir)
+    outcome = RunOutcome()
     run_started_at = time.perf_counter()
     succeeded, failed = await run_requests(
         requests,
         resolved_neo4j_settings,
         resolved_model_settings,
         show_progress=show_progress,
+        store=store,
+        outcome=outcome,
     )
     summary.run_seconds = measure_duration_seconds(run_started_at)
     summary.chunks_succeeded = succeeded
     summary.chunks_failed = failed
-    summary.records_succeeded = count_fully_succeeded_records(requests, failed)
+    _apply_outcome(summary, outcome, store, requests)
     summary.elapsed_seconds = measure_duration_seconds(started_at)
     return summary
 
@@ -543,20 +686,62 @@ def main() -> None:
         help="Disable the tqdm progress bar during a live run.",
     )
     parser.set_defaults(show_progress=True)
+    parser.add_argument(
+        "--manifest-path",
+        type=Path,
+        default=None,
+        help=(
+            "Progress manifest file. Defaults to "
+            f"{DEFAULT_STATE_DIR}/<split>-<dataset sha256 prefix>.json."
+        ),
+    )
+    parser.add_argument(
+        "--fresh-manifest",
+        action="store_true",
+        help=(
+            "Move any existing manifest for this source aside and start a new one. "
+            "Neo4j is still reconciled, so already-loaded chunks are not rewritten."
+        ),
+    )
     args = parser.parse_args()
 
-    summary = asyncio.run(
-        load_dataset(
-            dataset_path=args.dataset_path,
-            start_record=args.start_record,
-            max_records=args.records,
-            source_split=args.source_split,
-            dry_run=args.dry_run,
-            show_progress=args.show_progress,
+    stop_state = {"requested": False}
+
+    def request_stop(signum: int, _frame: object) -> None:
+        # First signal: finish the running chunk, flush state, exit. A second
+        # signal restores the default behavior and interrupts immediately.
+        stop_state["requested"] = True
+        signal.signal(signum, signal.SIG_DFL)
+        print(
+            "Stop requested: finishing the current chunk, then exiting. "
+            "Send the signal again to interrupt immediately.",
+            flush=True,
         )
-    )
+
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
+
+    try:
+        summary = asyncio.run(
+            load_dataset(
+                dataset_path=args.dataset_path,
+                start_record=args.start_record,
+                max_records=args.records,
+                source_split=args.source_split,
+                dry_run=args.dry_run,
+                show_progress=args.show_progress,
+                manifest_path=args.manifest_path,
+                fresh_manifest=args.fresh_manifest,
+                stop_requested=lambda: stop_state["requested"],
+            )
+        )
+    except ManifestError as error:
+        print(json.dumps({"error": str(error)}, indent=2))
+        raise SystemExit(2) from error
     print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
-    if summary.chunks_failed or summary.dead_lettered_records:
+    if summary.stopped_early:
+        raise SystemExit(130)
+    if not summary.succeeded:
         raise SystemExit(1)
 
 

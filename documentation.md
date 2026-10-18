@@ -287,6 +287,8 @@ Loader options:
 | `--source-split LABEL` | Derived from filename | Override the dataset split label stored as provenance. |
 | `--dry-run` | Off | Validate and count planned chunks without connecting to Neo4j or OpenRouter. |
 | `--no-progress` | Progress enabled | Disable the progress bar during live ingestion. |
+| `--manifest-path PATH` | `runs/ingestion-state/<split>-<first-16-SHA256-characters>.json` | Override the progress file for one dataset source. |
+| `--fresh-manifest` | Off | Move the existing manifest aside and start new state; still reconcile Neo4j before extraction. |
 | `-h`, `--help` | N/A | Show command help. |
 
 The loader reports records and chunks planned, succeeded, and failed, plus
@@ -294,6 +296,82 @@ dead-lettered records. It exits nonzero when records are invalid or chunks fail.
 `--dry-run` is not a preload: it does not write data. The live loader can incur
 provider cost and writes to Neo4j. Run retrieval prerequisites and ensure the
 vector index is online after ingestion.
+
+#### Resume, stop, and local state
+
+Live ingestion automatically checkpoints progress and resumes on the next run.
+Use the same dataset path, split, record range, and manifest path to continue:
+
+```sh
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --records 1 --no-progress
+# After a stop, repeat the same command to reconcile and resume.
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --records 1 --no-progress
+```
+
+The manifest identifies a source by its complete file SHA-256 and split, then
+tracks each record's expected stable paragraph chunk IDs. Record IDs alone do
+not identify a source across files. The default filename includes the split
+and first 16 checksum characters; the full checksum is checked inside the file.
+Changing a dataset creates a separate default manifest. An explicit path that
+contains a different checksum or split is rejected with exit `2`; choose another
+path or deliberately use `--fresh-manifest`.
+
+Chunk states are `pending`, `in_flight`, `verified`, `failed`, and
+`needs_investigation`. Before extraction, state is flushed as `in_flight`.
+After the pipeline finishes, Chunk provenance is synchronized from its Document
+and read back from Neo4j; only a matching complete result becomes `verified`.
+A record becomes loaded only when every expected paragraph is verified.
+On every resume, Neo4j takes precedence over the manifest: matching complete
+chunks skip extraction and embedding calls, absent chunks are ingested, and
+partial or conflicting chunks are reported and skipped. A write that completed
+before its checkpoint can therefore be detected without another provider call.
+
+Press Ctrl-C once (or send SIGTERM) to request a clean stop. The current
+pipeline call finishes and checkpoints before the loader stops at the next
+chunk boundary. An early stop prints a JSON summary and exits `130`. If the
+signal arrives during the final chunk, the batch may finish normally. Sending
+the same signal again uses immediate default signal termination; there may be
+no summary and the exit status depends on the signal/platform. An interrupted
+`in_flight` entry is treated as pending on reload, reported in
+`interrupted_in_flight_chunks`, and reconciled before any new extraction.
+
+The summary includes `records_loaded`, newly succeeded chunks,
+`chunks_skipped_already_verified`, failures, investigation reports, interrupted
+chunk IDs, `stopped_early`, `chunks_not_attempted`, and `manifest_paths`.
+Recovered interrupted entries can still yield success once all work verifies.
+Handled batch-loader exit codes are:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Successful batch, or successful dry-run validation. |
+| `1` | Invalid/dead-lettered records, failed chunks, or unresolved partial/conflicting graph state. Unexpected runtime errors also generally exit nonzero. |
+| `2` | Manifest error (including a checksum/split mismatch), or argument-parser error. |
+| `130` | Requested clean stop before all chunks were processed. |
+
+Progress is local operational state under gitignored `runs/`, retained after
+completion so later runs can reuse it. Updates write a temporary file, flush
+and fsync it, then atomically replace the manifest. `--fresh-manifest` moves
+old state to `<manifest>.superseded-<timestamp>`; it does not reset graph data.
+Deleting a manifest also leaves Neo4j unchanged; the next run reconciles it
+again. Keep state backups when investigating interruptions. Dry runs neither
+create manifests nor contact Neo4j or providers.
+
+Partial/conflicting state remains `needs_investigation`, with node element IDs,
+counts, and a reason in the summary. It is never automatically deleted,
+overwritten, or repaired. Investigate the reported nodes before manually
+cleaning them up; a later run ingests a chunk only after it classifies absent.
+Failed chunks are checked again on the next run; there is currently no durable
+retry queue or automatic bounded retry/backoff policy at the chunk level.
+
+Use one ingestion writer at a time. Task 13's database-level idempotency guard
+is not yet implemented. Verification currently expects one full-text Chunk per
+paragraph: paragraphs exceeding `GRAPH_RAG_CHUNK_SIZE` (default `10000`) can be
+split and reported partial. Splitter sizing remains Task 13 work.
+
+Query `--preload` uses the same automatic manifest/reconciliation path, with one
+default file per checksum and split when multiple sources are selected. It
+does not expose the batch loader's manifest override/fresh-state flags or its
+clean-stop signal handler. Query-only runs do not invoke ingestion.
 
 #### Query or preload selected records
 

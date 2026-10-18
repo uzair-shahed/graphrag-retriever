@@ -2,15 +2,15 @@
 
 **Date:** 17 October 2026
 
-**Last modified:** 17 October 2026
+**Last modified:** 18 October 2026
 
 **Purpose of this file:**
 
-Record the remaining retrieval-pipeline hardening tasks identified during the
-repository-wide audit on 17 October 2026. The current pipeline is implemented
-and its deterministic test suite passes, but these tasks are required before
-claiming that GraphRAG answers, evidence, citations, performance, and live
-artifacts are production-reliable.
+Record the remaining retrieval-pipeline and MuSiQue ingestion hardening tasks
+identified during the repository-wide audit on 17 October 2026. The current
+pipeline is implemented and its deterministic test suite passes, but these
+tasks are required before claiming that GraphRAG answers, evidence, citations,
+performance, live artifacts, and long-running ingestion runs are reliable.
 
 **Files that use this file:**
 
@@ -21,6 +21,11 @@ artifacts are defined in `src/graphrag_pipeline/query.py` and
 `src/graphrag_pipeline/musique_verification.py`. The broader project roadmap
 is maintained in `agent-coordination/tasks.md` and the earlier vertical-slice
 goal is maintained in `agent-coordination/tasks-goals-01-oct-2026.md`.
+The MuSiQue batch ingestion path is implemented in
+`src/graphrag_pipeline/ingestion/load_musique_dataset.py`, with record
+adaptation and the `SimpleKGPipeline` boundary in
+`src/graphrag_pipeline/ingestion/record_adapter.py` and
+`src/graphrag_pipeline/extraction/`.
 
 **Caveats:**
 
@@ -28,7 +33,11 @@ The audit found no current static diagnostics and the deterministic suite
 reported 118 passing tests. The live Neo4j preload and query path has also
 been exercised, but no dedicated repeatable end-to-end retrieval harness
 currently captures that run. Existing worktree changes are user or
-automation-owned and must be preserved while completing these tasks.
+automation-owned and must be preserved while completing these tasks. The
+batch loader currently reports chunk failures but does not persist resumable
+progress or a durable retry queue. The new tasks cover reliability around the
+`SimpleKGPipeline` ingestion and Neo4j write path; they do not claim that the
+separate autonomous entity-resolution agent is implemented.
 
 ## Completion Log
 
@@ -329,6 +338,168 @@ broken for `VectorCypherRetriever`. `Chunk` nodes also lacked `record_id`
 - The measurements use two records. They show candidate correctness, not
   large-corpus latency; Task 7 should re-measure on the evaluation set.
 - Corpus-wide (unfiltered) retrieval is unaffected and needs no declaration.
+
+### Task 11 — Persist resumable MuSiQue ingestion progress (2026-10-18)
+
+**Status:** IMPLEMENTATION AND VALIDATION COMPLETE; ready for user acceptance.
+Live stop/resume, independent Neo4j duplicate/provenance audit, final
+documentation, and deterministic tests passed. The user authorized finishing
+all remaining subtasks together, superseding per-subtask pauses.
+Tasks 13 (idempotent writes) then 12 (retry queue) have not been
+started (agreed order: 11 → 13 → 12). Approved plan:
+`implementation_plan.md` in the Antigravity artifact directory for this
+conversation (`a5f19288-eccf-4a8b-b1e8-091c0511dc24`).
+
+**What was implemented:**
+
+- `src/graphrag_pipeline/ingestion/progress_manifest.py` (new): `ProgressManifest`
+  and `ManifestStore`. One JSON file per source (dataset SHA-256 + split) at
+  `runs/ingestion-state/<split>-<sha prefix>.json` (`runs/` is already
+  gitignored) or `--manifest-path`. Atomic writes (temp file, fsync,
+  `os.replace`). Chunk statuses: `pending`, `in_flight`, `verified`, `failed`,
+  `needs_investigation`. A record is complete only when every expected chunk is
+  `verified`. A manifest for a different checksum/split raises
+  `ManifestSourceMismatch`. `in_flight` chunks found on load become `pending`
+  and are listed as interrupted. `--fresh-manifest` moves an old file aside
+  (`*.superseded-<ts>`), never deletes it.
+- `src/graphrag_pipeline/ingestion/reconcile.py` (new): read-only
+  `classify_chunk` returning `absent`/`complete`/`partial`/`conflict` for a
+  chunk against Neo4j (Document provenance, exactly one Chunk, Chunk text equal
+  to the paragraph, copied provenance). This is the classifier Task 13 builds
+  on; report-and-skip of partial/conflict chunks is already wired in.
+- `load_musique_dataset.py`: `run_requests` gained optional `store`,
+  `stop_requested`, `outcome` (`RunOutcome`) parameters and still returns
+  `(succeeded, failed)`. With a store, each chunk is classified against Neo4j
+  first (`complete` → skipped and marked verified; `partial`/`conflict` →
+  reported as `needs_investigation` and skipped, never deleted/overwritten;
+  `absent` → flushed `in_flight`, run, provenance synchronized, re-classified,
+  and marked `verified` only if `complete`). A stop request is polled before
+  each chunk. `LoadSummary`/`PreloadSummary` report skipped, needs-investigation,
+  interrupted, stopped-early, not-attempted counts and manifest paths, and
+  `succeeded` is false for failures, investigation cases, invalid records or an
+  early stop; successfully reconciled interruptions may still succeed.
+  `load_dataset` and `load_selected_records`
+  (query `--preload`) use the store. CLI: `--manifest-path`, `--fresh-manifest`;
+  first SIGINT/SIGTERM finishes the running chunk and exits 130 if work remains;
+  a repeated same signal interrupts immediately; manifest errors exit 2.
+
+**Original handoff tests (205 passed; final validation below: 232 passed):**
+
+- `tests/unit/test_progress_manifest.py`, `tests/unit/test_reconcile.py`,
+  `tests/unit/test_load_resume.py` (new): atomic-write failure, checksum/split
+  mismatch, record-complete rule, in-flight demotion, clean stop then "new
+  process" resume skipping verified work, failed chunk retried alone on resume,
+  crash after Neo4j write before checkpoint (no provider call, no rewrite),
+  crash before write (re-ingested), pre-existing partial chunk reported and
+  skipped, post-write verification failure, deleted-then-reingested chunk,
+  changed-checksum rejection.
+- `tests/unit/test_query_preload.py`: the live-preload test's fake runner now
+  registers/verifies via the store.
+
+**Original live validation (real Ollama + live Neo4j, record 1 of the dev file,
+20 chunks, graph was empty beforehand):** a live load wrote verified chunks
+(post-write Neo4j check passed, so real `Chunk.text` equals the paragraph text
+and one Chunk per paragraph held for those chunks). SIGINT was sent mid-run; the
+loader printed the clean-stop message and was finishing its current chunk. At
+the last check the manifest was `verified: 7, pending: 12, in_flight: 1`.
+
+**Remaining for Task 11 (pick up here) — implementation now complete:**
+
+Continuation update (2026-10-18): subtask 1 was verified and the user authorized
+continuation. Recovered original output confirms exit
+130, 8 succeeded, 12 not attempted, 0 failed, 0 loaded records, and a clean stop.
+The pre-resume raw manifest contained 8 verified and 12 pending chunks, with no in-flight
+entries; checksum/split and all expected chunk IDs match the actual dataset.
+The clean-stop regression now checks on-disk statuses before manifest reload
+can demote in-flight entries. Focused ingestion/preload validation: 37 passed.
+Subtask 2 is now complete:
+
+- Live preflight classified exactly 8 requests complete and 12 absent in Neo4j;
+  Ollama's configured `qwen3:4b-instruct` and `nomic-embed-text` models were
+  available. No source, configuration, or progress reset was needed.
+- Ran the real CLI entry point with `--records 1 --no-progress` through a
+  delegating observation harness. Original manifest preserved; stdout, stderr,
+  exit code, before/after manifests, per-chunk pipeline events, and assertions
+  saved under `runs/task11-resume-b4bf236db382/` (gitignored).
+- Exit **0**; **8 skipped**, **12 succeeded**, **1 record loaded**; no failures,
+  investigation cases, interrupted chunks, or unattempted work. Elapsed
+  **146.661 seconds**; stderr empty.
+- Exact invocation list: paragraphs **8–19** only, each returning successfully.
+  Previously verified paragraphs **0–7** made no extraction pipeline calls.
+- Final manifest: **20 verified**, each with one attempt; skipped entries'
+  attempt counts unchanged. Each newly written chunk passed the loader's
+  post-write Neo4j classification before being marked verified.
+- Six live evidence assertions passed. Extended the deterministic clean-stop
+  and resume test to check persisted post-resume statuses and unchanged skipped
+  attempts; focused ingestion/preload suite: **37 passed**.
+
+Final continuation completed subtasks 3–5:
+
+- **Independent live Neo4j audit passed:** both whole-database and selected
+  source/record totals are **20 Documents and 20 Chunks**. All 20 expected
+  stable IDs have exactly one Document, one full-text Chunk, and one
+  `FROM_DOCUMENT` link to the expected Document. No duplicate source nodes or
+  links were found. Every source text, Document metadata field, and copied Chunk
+  provenance field matched the actual dataset requests. All requests classify
+  complete. The audit was read-only and confirmed unchanged manifest bytes.
+  Evidence: `runs/task11-resume-b4bf236db382/graph-audit.json`; local audit
+  script: `runs/task11_graph_audit.py`.
+- **Closed a provenance verification gap:** reconciliation now also checks
+  Document title, dataset, split and source file, and Chunk document ID, source
+  file, source line and title. Existing ID/checksum/index checks remain. An
+  optional absent title remains valid. Added 19 regression cases covering all
+  10 Document metadata fields, all 8 copied Chunk fields, and absent title.
+  The live audit passed again using this strengthened classifier.
+- **CLI and actual process tests:** added `tests/unit/test_ingestion_cli.py`
+  with 4 outcome/flag tests (0/1/2/130, custom/fresh manifest wiring) and 4
+  POSIX subprocess cases (SIGINT/SIGTERM, single/repeated signal). Single-signal
+  cases finish the in-flight chunk, persist clean state, exit 130 and resume
+  only pending work in a new process. Repeated-signal cases terminate with the
+  default signal status, preserve the in-flight checkpoint, reconcile unwritten
+  work after restart, and retain attempt counts. Fake provider/graph boundaries
+  avoid network/cost while exercising the real CLI, loader and durable manifest.
+  All 4 subprocess cases passed on macOS; they skip on Windows.
+- **Documentation finished:** README and `documentation.md` now explain both
+  manifest flags, automatic resume, full source identity, local file lifecycle,
+  atomic checkpoints, safe and immediate stops, handled exit codes, summary
+  fields, partial/conflict investigation, query-preload behavior, and current
+  limitations. Corrected README's per-paragraph pipeline construction wording
+  to describe the actual shared pipeline instance.
+- **Final checks passed:** actual CLI help matches the new flag reference;
+  documented dry-run planned 20 chunks with no loaded chunks/manifest paths and
+  exited 0. `.venv/bin/python -m pytest tests/unit -q` → **232 passed in
+  3.08 seconds**, no skipped tests. `git diff --check` passed. This adds 27 test
+  cases over the 205-test handoff, plus stronger existing resume assertions.
+- No further provider calls or graph writes were made during this final audit
+  and documentation stage. Task 13 and Task 12 have not been started.
+
+See [the remainder plan and evidence](task-11-remainder-plan.md) for full staged
+validation. Task 11 is ready for user acceptance; this sequential-run validation
+does not establish Task 13's database-level idempotent-write guarantee.
+
+1. **Complete:** Inspect the stopped loader's JSON summary/exit code 130 and manifest
+   (`runs/ingestion-state/full_dev-8cab31d56a3a1c4e.json`); confirm no chunk is
+   left `in_flight` after a clean stop.
+2. **Complete:** Re-run `python -m graphrag_pipeline.ingestion.load_musique_dataset --records 1
+   --no-progress`, confirm the verified chunks are skipped without provider
+   calls, the rest are loaded, and the record reports as loaded.
+3. **Complete:** Confirm in Neo4j: 20 `Document` and 20 `Chunk` nodes, no duplicates.
+4. **Complete:** Update `README.md` / `documentation.md` (new flags, manifest
+   lifecycle, exit codes), validate CLI behavior, and pass the full unit suite.
+5. **Handoff complete; user acceptance pending:** report all Task 11 work and
+   verification. Do not start Task 13 without an explicit user instruction.
+
+**Caveats:**
+
+- Resume trusts Neo4j over the manifest; a `partial` chunk (for example a
+  crash between the pipeline write and provenance synchronization) is reported
+  and skipped until the user deletes its nodes. There is no automatic repair.
+- No unique constraint exists yet (Task 13), so concurrent writers are not
+  protected. No retry queue exists yet (Task 12): failed chunks are simply
+  retried on the next run.
+- `GRAPH_RAG_CHUNK_SIZE` defaults to 10000; a paragraph longer than that would
+  split into several chunks and be classified `partial` (Task 13 plans to size
+  the splitter to the longest paragraph).
 
 ## Goal
 
@@ -704,6 +875,110 @@ or establish a record-root/component identity and enforce it during traversal.
 - Graph resource and context limits are enforced before provider invocation,
   and component incompleteness is explicit.
 
+### 11. Persist resumable MuSiQue ingestion progress
+
+**Priority:** High
+
+- Add a durable local progress manifest for batch ingestion, using a simple
+  JSON format unless the implementation provides a justified alternative.
+- Identify a run's source unambiguously with the dataset file checksum and
+  split, and track each record and its stable paragraph-level `chunk_id`
+  requests. Do not treat a record ID alone as globally unique across files.
+- Persist progress atomically as chunks finish. Mark a record complete only
+  after every expected paragraph request has completed the configured
+  `SimpleKGPipeline` stages and its Neo4j provenance has been verified.
+- On resume, compare the manifest with the selected source and reconcile it
+  with persisted Neo4j chunk/record provenance. Skip verified existing work;
+  continue pending or partial records without silently skipping missing
+  chunks. Reject or explicitly separate a manifest whose source checksum has
+  changed.
+- Handle a requested clean stop by stopping before starting more chunks,
+  waiting for the current pipeline call to reach a safe boundary when
+  possible, and flushing progress before exit. An interrupted in-flight chunk
+  must remain pending until Neo4j state is checked.
+- Add a configurable manifest path and document the resume behavior and local
+  file lifecycle.
+
+**Acceptance criteria:**
+
+- A deterministic test stops a multi-record load after some chunks complete,
+  starts a new process with the same source, and proves verified work is
+  skipped while pending work resumes.
+- A record with any missing or failed paragraph chunk is never reported as
+  fully loaded.
+- Clean-stop and interrupted-in-flight cases preserve enough state to resume
+  without losing failures or falsely marking a record complete.
+- A source checksum mismatch cannot cause old progress to be applied silently
+  to different dataset contents.
+
+### 12. Persist and drain a failed-chunk retry queue
+
+**Priority:** High
+
+- Add a durable retry queue for every failed application chunk request, keyed
+  by its stable `chunk_id` and retaining `record_id`, source fingerprint and
+  provenance, attempt count, last error category, and retry status.
+- Enqueue the failure before returning or continuing the batch. Resume or an
+  explicit retry operation must be able to load queued chunks and send them
+  through the same configured `SimpleKGPipeline` and Neo4j verification path.
+- Use bounded retry attempts and backoff for retryable failures. Keep
+  non-retryable or exhausted failures in a durable dead-letter state rather
+  than dropping them from the queue.
+- Keep a record partial until every expected chunk has been verified in
+  Neo4j and no queued or dead-lettered chunk remains unresolved. Successful
+  chunks must not need to repeat provider work when a different chunk fails.
+- Automatic replay depends on the idempotent write guarantee in Task 13;
+  until that guarantee is verified, do not blindly replay a chunk that may
+  already have written graph data.
+
+**Acceptance criteria:**
+
+- A deterministic test injects a chunk failure, restarts the loader, and
+  proves the failed chunk is retried from the durable queue while successful
+  chunks are not needlessly reprocessed.
+- Retry attempts, backoff, terminal errors, and dead-letter state are visible
+  in the run summary and persisted state.
+- A record with one failed or unresolved chunk remains incomplete until that
+  chunk succeeds and its Neo4j provenance is verified.
+
+### 13. Make SimpleKGPipeline chunk ingestion idempotent
+
+**Priority:** High
+
+- Make replaying the same validated MuSiQue paragraph request, including
+  retries and resume after interruption, converge on one persisted source
+  chunk rather than duplicate graph data.
+- Use stable `chunk_id` plus source fingerprint/provenance as the identity
+  boundary. Before skipping existing data, verify that the stored text and
+  provenance match; report an explicit conflict if the same identity refers
+  to different input.
+- Inspect and test the actual `SimpleKGPipeline` Neo4j writer behavior. Use
+  compatible uniqueness/MERGE semantics or another verified guard for
+  plugin-created source documents, chunks, relationships, and entity-resolution
+  effects. Do not assume that deterministic IDs or a successful pipeline call
+  alone make graph writes idempotent.
+- Cover the failure window where Neo4j writes succeed but the local progress
+  manifest is not yet updated. A retry must detect and verify that persisted
+  work instead of writing duplicate source chunks or source-bound graph
+  relationships.
+- Keep the supported sequential ingestion contract; if concurrent writers
+  are later introduced, enforce duplicate prevention at the database boundary
+  rather than relying only on a local preflight check.
+
+**Acceptance criteria:**
+
+- Running the same chunk request twice leaves one logical source chunk and
+  does not increase duplicate source-document, chunk, or source-bound
+  relationship counts.
+- An integration test simulates a stop after the Neo4j write and before the
+  progress checkpoint, then proves resume produces no duplicates and
+  preserves correct provenance.
+- Reusing a `chunk_id` with changed text or source provenance fails explicitly
+  instead of silently overwriting or accepting conflicting data.
+- Tests cover the configured entity-resolution behavior as well as lexical
+  `Document`/`Chunk` writes, so reruns cannot silently duplicate graph effects
+  beyond the source-chunk boundary.
+
 ## Validation Plan
 
 Before marking this goal complete:
@@ -719,6 +994,13 @@ Before marking this goal complete:
 - Verify a GraphRAG integration fixture returns the complete seed-associated
   component with no hop-depth limit, while respecting the verified component
   boundary and explicit resource safeguards.
+- Exercise ingestion interruption and resume with persisted progress, including
+  a clean stop and an in-flight chunk whose Neo4j state must be reconciled.
+- Exercise a failed-chunk retry from the durable queue and verify its parent
+  record stays incomplete until all expected chunks are persisted.
+- Run the same chunk through the configured `SimpleKGPipeline` repeatedly,
+  including a write-before-checkpoint interruption, and verify graph counts,
+  entity-resolution effects, text, and provenance remain idempotent.
 - Update `documentation.md` with the final backend limitations, index
   requirements, harness command, and known skipped integration conditions.
 
