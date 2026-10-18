@@ -10,8 +10,8 @@ The Windows CI workflow is configured to check Python setup, unit tests, and
 CLI startup. The live Neo4j Desktop, APOC/GenAI plugin, and local Ollama setup
 below has not yet been verified on Windows.
 
-Install `uv` in PowerShell, then close and reopen the terminal so `uv` is on
-`PATH`:
+Install [Git for Windows](https://git-scm.com/download/win) if needed, then
+install `uv` in PowerShell. Close and reopen the terminal so `uv` is on `PATH`:
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
@@ -21,7 +21,7 @@ Clone the repository and install the locked environment from the repository
 root:
 
 ```powershell
-git clone <repository-url> project-repo
+git clone https://github.com/uzair-shahed/graphrag-retriever.git project-repo
 Set-Location project-repo
 uv python install 3.14.3
 uv sync --locked --extra dev
@@ -40,15 +40,15 @@ then install `uv` and the locked project environment:
 
 ```sh
 brew install uv
-git clone <repository-url>
+git clone https://github.com/uzair-shahed/graphrag-retriever.git project-repo
 cd project-repo
 uv sync --locked --extra dev
 uv run --locked python -m pytest tests/unit -v
 ```
 
-`uv` reads `.python-version`, installs the selected Python if necessary, creates
-`.venv`, and installs the exact versions recorded in `uv.lock`. No activation
-command is needed. The unit tests need neither Neo4j nor model credentials.
+`uv sync` creates `.venv` and installs the exact versions recorded in `uv.lock`;
+`uv run` uses that environment without a separate activation command. The unit
+tests need neither Neo4j nor model credentials.
 
 ## Live GraphRAG Workflow
 
@@ -59,12 +59,34 @@ baseline, not a guarantee for every Neo4j release.
 1. Install [Neo4j Desktop](https://neo4j.com/download/) and create/start a local
    Neo4j Enterprise `2026.08.1` database. In Desktop, install APOC and the
    Neo4j GenAI plugin if their procedures are not available, then restart the
-   database. Verify the server and procedures using
+   database. On Windows, use the Windows installer; this live database/plugin
+   path has not yet been verified there. Verify the server and procedures using
    [the compatibility notes](agent-coordination/neo4j/compatibility.md).
-2. Copy `.env.example` to `.env`. Set the Neo4j Bolt URI, username, and password,
-   then provide an OpenRouter API key or configure the Ollama provider. Never
-   commit `.env`. Live extraction and answering send text to the selected
-   provider and may incur charges.
+2. Copy `.env.example` to `.env`. On Windows PowerShell:
+
+   ```powershell
+   Copy-Item .env.example .env
+   notepad .env
+   ```
+
+   Set the Neo4j Bolt URI, username, and real password (replace the `changeme`
+   placeholder), and keep `NEO4J_DATABASE=neo4j`, which is the database currently
+   used by extraction. Install the
+   [Windows version of Ollama](https://ollama.com/download/windows), start it,
+   then pull the configured default models in PowerShell:
+
+   ```powershell
+   ollama pull qwen3:4b
+   ollama pull nomic-embed-text
+   ollama list
+   ```
+
+   Set `GRAPH_RAG_PROVIDER=ollama` in `.env`; the OpenRouter key placeholder can
+   remain unchanged when Ollama is selected. The default `nomic-embed-text`
+   embedding size is 768, so also set `GRAPH_RAG_VECTOR_DIMENSIONS=768`. For
+   OpenRouter's default `text-embedding-3-small`, keep it at 1536 and set a valid
+   `OPENROUTER_API_KEY`. Never commit `.env`. Live extraction and answering send
+   text to the selected provider and may incur charges.
 3. Run the small, tracked extraction fixture against the database:
 
    ```sh
@@ -76,17 +98,22 @@ baseline, not a guarantee for every Neo4j release.
 4. In Neo4j Desktop's query tool, create the vector index using the
    [Neo4j vector-index syntax](https://neo4j.com/docs/cypher-manual/current/indexes/semantic-indexes/vector-indexes/).
    The example matches the checked-in OpenRouter model's 1,536 dimensions and
-   cosine similarity; change the dimensions and `.env` settings together if
-   using a different embedding model.
+   cosine similarity. For Ollama's default `nomic-embed-text`, change both the
+   Cypher dimension below and `GRAPH_RAG_VECTOR_DIMENSIONS` in `.env` to 768.
+   Keep the index dimension aligned with the embedding model used to create the
+   graph's vectors. If changing embedding models for an existing graph, regenerate
+   its embeddings with the selected model before creating or querying the index.
 
    ```cypher
    CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
    FOR (chunk:Chunk)
    ON chunk.embedding
    OPTIONS {indexConfig: {
-     `vector.dimensions`: 1536,
+      `vector.dimensions`: 1536,
      `vector.similarity_function`: 'cosine'
    }};
+
+   # NOTE: The 1536 embedding should be 768 for Ollama and 1536 for OpenRouter depending on the embedding model being used.
    ```
 
    Wait for the index to become `ONLINE`. The pipeline verifies the index; it
@@ -117,30 +144,21 @@ paragraph chunks will be processed. `--records` is required and counts records;
 `--start-record` is the 1-indexed starting position (default `1`):
 
 ```sh
-uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
-   --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-   --records 1 \
-   --dry-run
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --records 1 --dry-run
 ```
 
 When the summary looks right, repeat the command without `--dry-run` to run
 extraction and write the resulting graph data to the configured Neo4j database:
 
 ```sh
-uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
-   --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-   --records 1
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --records 1
 ```
 
 To load three records starting with the fourth record, use `--records 3` and
 `--start-record 4`. Dry-run that batch first with:
 
 ```sh
-uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
-   --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-   --records 3 \
-   --start-record 4 \
-   --dry-run
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --records 3 --start-record 4 --dry-run
 ```
 
 The loader also supports `--source-split LABEL` to override the provenance
@@ -159,6 +177,11 @@ record should be ingested immediately before querying. The record ID must be
 unique across the supplied dataset files. See the
 [operational guide](documentation.md#musique-ingestion-and-query-command-reference)
 for the complete query-command flag reference and more examples.
+
+Before using `--record-id` on a graph with the basic vector index created
+above, run `uv run --locked python -m graphrag_pipeline.vector_index_setup --apply`
+to backfill chunk provenance and recreate the index with `record_id`
+filter support. The index is unavailable until Neo4j reports it `ONLINE`.
 
 ## Further Documentation
 

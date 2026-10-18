@@ -271,16 +271,10 @@ to inspect the planned work before a live load.
 
 ```sh
 # Plan the first three records without Neo4j or model-provider calls.
-uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
-    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-    --records 3 \
-    --dry-run
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --records 3 --dry-run
 
 # Load records 4, 5, and 6 into the configured Neo4j database.
-uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset \
-    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-    --records 3 \
-    --start-record 4
+uv run --locked python -m graphrag_pipeline.ingestion.load_musique_dataset --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --records 3 --start-record 4
 ```
 
 Loader options:
@@ -310,28 +304,13 @@ one or more times, or configure `GRAPH_RAG_DATASET_PATHS` in `.env`.
 
 ```sh
 # Query one existing MuSiQue record without ingesting it.
-uv run --locked graphrag-query \
-    --record-id UNIQUE_RECORD_ID \
-    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-    --retrieval-backend graphrag \
-    --artifact runs/record-query.json
+uv run --locked graphrag-query --record-id UNIQUE_RECORD_ID --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --retrieval-backend graphrag --artifact runs/record-query.json
 
 # Preload that selected record first, then query it and write an artifact.
-uv run --locked graphrag-query \
-    --record-id UNIQUE_RECORD_ID \
-    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-    --preload \
-    --retrieval-backend graphrag \
-    --top-k 8 \
-    --max-context-chunks 3 \
-    --artifact runs/record-preloaded-query.json
+uv run --locked graphrag-query --record-id UNIQUE_RECORD_ID --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --preload --retrieval-backend graphrag --top-k 8 --max-context-chunks 3 --artifact runs/record-preloaded-query.json
 
 # Query at most two selected records; artifacts are numbered per query.
-uv run --locked graphrag-query \
-    --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl \
-    --max-records 2 \
-    --retrieval-backend vectorrag \
-    --artifact runs/two-records.json
+uv run --locked graphrag-query --dataset-path dataset/musique/data/data/musique_full_v1.0_dev.jsonl --max-records 2 --retrieval-backend vectorrag --artifact runs/two-records.json
 ```
 
 Query options:

@@ -23,7 +23,7 @@ DEFAULT_FIXTURE = Path("tests/fixtures/musique/extraction_chunk.json")
 
 def load_fixture(path: Path) -> ExtractionRequest:
     """Load and validate one model-visible MuSiQue paragraph fixture."""
-    return ExtractionRequest.model_validate(json.loads(path.read_text()))
+    return ExtractionRequest.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
 async def run_fixture(path: Path) -> dict[str, Any]:
