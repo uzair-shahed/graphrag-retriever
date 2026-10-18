@@ -3,17 +3,19 @@
 These tests cover only local configuration and construction policy. They do
 not call OpenRouter, ingest a MuSiQue paragraph, or write application data to
 Neo4j. The pipeline test uses a real Neo4j ``Driver`` instance because the
-installed GraphRAG API validates that type, then mocks only the startup version
-query performed by the Neo4j writer.
+installed GraphRAG API validates that type. Construction of the atomic writer
+does not access the database.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from neo4j import GraphDatabase
 from neo4j_graphrag.components.types import Neo4jGraph
 
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
+from graphrag_pipeline.extraction.idempotency import ParagraphSplitter
+from graphrag_pipeline.extraction.atomic_writer import AtomicKGWriter
 from graphrag_pipeline.ollama_json_schema import OllamaJSONSchemaLLM
 
 
@@ -44,12 +46,7 @@ def test_openrouter_settings_parse_without_exposing_secret() -> None:
 
 
 def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
-    """Verify the first-run flags sent to ``SimpleKGPipeline``.
-
-    The fake credentials and mocked version response keep this test offline;
-    the live Neo4j initialization check is performed separately by the
-    integration workflow.
-    """
+    """Verify provider policy, atomic writer, paragraph splitter and disabled resolver offline."""
     settings = OpenRouterSettings(
         api_key="test-key",
         base_url="https://openrouter.ai/api/v1",
@@ -63,18 +60,7 @@ def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
 
     driver = GraphDatabase.driver("bolt://127.0.0.1:7687", auth=("test", "test"))
     try:
-        with patch.object(
-            driver,
-            "execute_query",
-            MagicMock(
-                return_value=(
-                    [{"versions": ["2026.08.1"], "edition": "enterprise"}],
-                    None,
-                    None,
-                )
-            ),
-        ):
-            pipeline = build_simple_kg_pipeline(driver=driver, settings=settings)
+        pipeline = build_simple_kg_pipeline(driver=driver, settings=settings)
 
         llm = pipeline.runner.config.llm_config["default"].root
         assert llm.model_name == "openai/gpt-4o-mini"
@@ -87,8 +73,8 @@ def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
         assert pipeline.runner.config.perform_entity_resolution is False
         assert pipeline.runner.config.neo4j_database == "neo4j"
         splitter = pipeline.runner.config.text_splitter.root
-        assert splitter.chunk_size == 10000
-        assert splitter.chunk_overlap == 0
+        assert isinstance(splitter, ParagraphSplitter)
+        assert isinstance(pipeline.runner.config.kg_writer.root, AtomicKGWriter)
     finally:
         driver.close()
 
@@ -103,18 +89,7 @@ def test_pipeline_factory_builds_ollama_components() -> None:
 
     driver = GraphDatabase.driver("bolt://127.0.0.1:7687", auth=("test", "test"))
     try:
-        with patch.object(
-            driver,
-            "execute_query",
-            MagicMock(
-                return_value=(
-                    [{"versions": ["2026.08.1"], "edition": "enterprise"}],
-                    None,
-                    None,
-                )
-            ),
-        ):
-            pipeline = build_simple_kg_pipeline(driver=driver, settings=settings)
+        pipeline = build_simple_kg_pipeline(driver=driver, settings=settings)
 
         llm = pipeline.runner.config.llm_config["default"].root
         embedder = pipeline.runner.config.embedder_config["default"].root

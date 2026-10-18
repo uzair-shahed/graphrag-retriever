@@ -18,7 +18,8 @@ The original, longer hand-built extraction and answer-generation design has been
 - The active extraction engine is Neo4j GenAI Plugin `SimpleKGPipeline`; application code passes `text` and `document_metadata` and treats the resulting Neo4j graph as the output surface.
 - Gold labels such as `is_supporting` remain in the dataset/chunk store but are not sent as model-visible extraction input.
 - Provenance is preserved from the source JSONL file through the chunk, plugin input, and persisted graph state.
-- Neo4j access for the live extraction path is write-capable only for the plugin-managed graph write; read-only verification is used after the run.
+- Neo4j extraction writes use the application's atomic `KGWriter` supplied to
+  `SimpleKGPipeline`; graph verification before reuse is read-only.
 - The current local implementation was verified against a successful focused MuSiQue fixture run and graph inspection in the local `neo4j` database.
 
 ## Architecture Scope
@@ -45,6 +46,32 @@ validated chunk -> plugin input metadata contract
 Contract 4
 plugin-created Neo4j graph -> read-only provenance verification
 ```
+
+### Atomic paragraph ingestion (Task 13, 18 October 2026)
+
+The active batch, preload and fixture boundaries call `ingest_paragraph` before
+invoking the pipeline. Source identity is the application `chunk_id` checked
+against an exact canonical request fingerprint and direct text/provenance
+comparison. All validated request fields contribute to identity; labels and
+gold answers never enter it. Optional absent titles are omitted from plugin
+metadata, because its values must be strings.
+
+`ParagraphSplitter` emits exactly one unchanged paragraph. The configured
+`AtomicKGWriter` commits its Document, Chunk, entities, source/domain
+relationships, embeddings, copied Chunk provenance and versioned
+`IngestionCompletion` inventory in one bounded transaction. Managed keys are
+source-scoped and protected by node/relationship uniqueness constraints.
+Entity resolution remains disabled. The same-name entities emitted by the
+extractor remain distinct; Task 13 does not introduce canonical entity merging.
+
+`classify_chunk` reports `complete` only for a matching source with an intact
+atomic completion inventory. Matching unmarked data is `legacy_unverified`;
+missing graph effects are `partial`; changed input or duplicate source identity
+is `conflict`. Every unresolved state is preserved and keeps its record
+incomplete. Read-only `verify_graph_provenance` below remains a historical
+smoke-check interface and is not sufficient to certify ingestion completion.
+See [the operational identity/recovery contract](../documentation.md#atomic-ingestion-identity-and-legacy-data)
+and [Task 13 evidence](task-13-remainder-plan.md).
 
 The active system does not rely on the archived manual extraction schema as the source of truth. The earlier, more detailed extraction and answer-generation contracts remain useful for historical reference, but they are not active project doctrine.
 

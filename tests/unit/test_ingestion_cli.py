@@ -81,7 +81,6 @@ with (
     patch.object(loader, 'Neo4jConnection'),
     patch.object(loader, 'build_simple_kg_pipeline', return_value=pipeline),
     patch.object(loader, 'classify_chunk', side_effect=world.classify),
-    patch.object(loader, 'synchronize_chunk_provenance'),
 ):
     sys.argv = ['loader', '--records', '2', '--no-progress', '--manifest-path', str(root / 'manifest.json')]
     loader.main()

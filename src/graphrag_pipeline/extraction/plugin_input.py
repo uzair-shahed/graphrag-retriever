@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
 
@@ -19,7 +19,7 @@ class PluginDocumentMetadata(TypedDict):
     chunk_id: str
     document_id: str
     paragraph_idx: str
-    title: str | None
+    title: NotRequired[str]
 
 
 def build_plugin_input(
@@ -41,6 +41,7 @@ def build_plugin_input(
         "chunk_id": request.chunk_id,
         "document_id": request.document_id,
         "paragraph_idx": str(request.paragraph_idx),
-        "title": request.title,
     }
+    if request.title is not None:
+        metadata["title"] = request.title
     return request.text, metadata

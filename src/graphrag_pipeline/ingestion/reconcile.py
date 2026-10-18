@@ -12,11 +12,15 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
+from graphrag_pipeline.extraction.idempotency import (
+    CONTRACT_VERSION, MANAGED_LABEL, canonical_json, completion_rows, fingerprint, managed_key, read_inventory, request_json,
+)
 
 ABSENT = "absent"
 COMPLETE = "complete"
 PARTIAL = "partial"
 CONFLICT = "conflict"
+LEGACY = "legacy_unverified"
 
 _CHUNK_STATE_QUERY = """
 MATCH (d:Document {chunk_id: $chunk_id})
@@ -77,7 +81,7 @@ def _metadata_matches(actual: Any, expected: str | None) -> bool:
     return actual is None if expected is None else str(actual) == expected
 
 
-def classify_chunk(connection: _ReadConnection, request: ExtractionRequest) -> ChunkState:
+def classify_lexical_chunk(connection: _ReadConnection, request: ExtractionRequest) -> ChunkState:
     """Classify a chunk request as ``absent``, ``complete``, ``partial`` or ``conflict``.
 
     ``complete`` means exactly one ``Document`` for the ``chunk_id`` whose
@@ -142,3 +146,49 @@ def classify_chunk(connection: _ReadConnection, request: ExtractionRequest) -> C
                 chunk_element_ids,
             )
     return ChunkState(COMPLETE, "", document_ids, chunk_element_ids)
+
+
+def classify_chunk(connection: _ReadConnection, request: ExtractionRequest) -> ChunkState:
+    """Only an intact versioned atomic write is complete; legacy data stays unverified."""
+    lexical = classify_lexical_chunk(connection, request)
+    if lexical.state == CONFLICT:
+        return lexical
+    markers = completion_rows(connection, request.chunk_id)
+    inventory = read_inventory(connection, request.chunk_id)
+    if not markers:
+        if lexical.state == ABSENT and not any(inventory.values()):
+            orphans = connection.run_read(
+                "MATCH (c:Chunk) WHERE c.chunk_id = $chunk_id "
+                "OR (c.text = $text AND NOT (c)-[:FROM_DOCUMENT]->(:Document)) "
+                "RETURN elementId(c) AS id, c.text AS text", {"chunk_id": request.chunk_id, "text": request.text},
+            )
+            if orphans:
+                return ChunkState(PARTIAL, "unlinked or legacy Chunk exists without source Document; audit required",
+                                  [], [str(row["id"]) for row in orphans])
+        if lexical.state == COMPLETE:
+            lexical.state = LEGACY
+            lexical.reason = "matching legacy source has no atomic completion record; audit required"
+        elif lexical.state == ABSENT and any(inventory.values()):
+            lexical.state = PARTIAL
+            lexical.reason = "managed graph exists without source Document or completion record"
+        return lexical
+    if len(markers) != 1:
+        lexical.state, lexical.reason = CONFLICT, "duplicate completion records"
+        return lexical
+    marker = markers[0]["completion"]
+    if marker.get("fingerprint") != fingerprint(request) or marker.get("request_json") != request_json(request):
+        lexical.state, lexical.reason = CONFLICT, "completion record refers to different source input"
+    elif lexical.state != COMPLETE:
+        lexical.state, lexical.reason = PARTIAL, "completion exists but source graph is incomplete: " + lexical.reason
+    elif marker.get("contract_version") != CONTRACT_VERSION:
+        lexical.state, lexical.reason = PARTIAL, "unsupported ingestion write-contract version"
+    elif any(
+        len([node for node in inventory["nodes"]
+             if node["key"] == managed_key(request.chunk_id, role, "source")
+             and label in node["labels"] and MANAGED_LABEL in node["labels"]]) != 1
+        for role, label in (("document", "Document"), ("chunk", "Chunk"))
+    ):
+        lexical.state, lexical.reason = PARTIAL, "completion lacks uniquely managed source Document/Chunk"
+    elif marker.get("inventory_json") != canonical_json(inventory):
+        lexical.state, lexical.reason = PARTIAL, "persisted graph inventory differs from atomic completion record"
+    return lexical

@@ -1,11 +1,11 @@
-"""Unit tests for read-only chunk reconciliation against Neo4j state."""
+"""Lexical source checks; atomic completion/inventory tests are in test_ingestion_identity."""
 
 from __future__ import annotations
 
 import pytest
 
 from graphrag_pipeline.extraction.schemas import ExtractionRequest, Provenance
-from graphrag_pipeline.ingestion.reconcile import ABSENT, COMPLETE, CONFLICT, PARTIAL, classify_chunk
+from graphrag_pipeline.ingestion.reconcile import ABSENT, COMPLETE, CONFLICT, PARTIAL, classify_lexical_chunk as classify_chunk
 
 SHA = "a" * 64
 

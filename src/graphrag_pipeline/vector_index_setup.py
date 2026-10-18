@@ -19,8 +19,8 @@ Caveats:
     properties in place), so vector search is unavailable until the new index is
     ONLINE; embeddings are not recomputed. It preserves the existing index
     dimensions and similarity function. Without ``--apply`` nothing is changed.
-    Newly ingested records already receive ``Chunk.record_id`` through
-    ``synchronize_chunk_provenance``; only graphs loaded earlier need the backfill.
+    Newly ingested records receive ``Chunk.record_id`` inside the atomic writer;
+    only graphs loaded earlier need the backfill.
 """
 
 from __future__ import annotations

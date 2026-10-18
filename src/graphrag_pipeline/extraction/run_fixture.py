@@ -14,7 +14,9 @@ from graphrag_pipeline.diagnostics import (
     save_invalid_llm_response,
 )
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
-from graphrag_pipeline.extraction.plugin_input import build_plugin_input
+from graphrag_pipeline.extraction.atomic_writer import IngestionStateError
+from graphrag_pipeline.extraction.ingest import ingest_paragraph
+from graphrag_pipeline.ingestion.reconcile import COMPLETE
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 
@@ -34,19 +36,17 @@ async def run_fixture(path: Path) -> dict[str, Any]:
     database for inspection.
     """
     request = load_fixture(path)
-    text, document_metadata = build_plugin_input(request)
     neo4j_settings = Neo4jSettings.from_env()
     model_settings = model_settings_from_env()
     connection = Neo4jConnection(neo4j_settings)
     try:
         pipeline = build_simple_kg_pipeline(
-            connection.connect(), model_settings
+            connection.connect(), model_settings, neo4j_settings=neo4j_settings
         )
         try:
-            result = await pipeline.run_async(
-                text=text,
-                document_metadata=document_metadata,
-            )
+            ingested = await ingest_paragraph(connection, pipeline, request)
+            if ingested.state.state != COMPLETE:
+                raise IngestionStateError(f"{ingested.state.state}: {ingested.state.reason}")
         except Exception as error:  # noqa: BLE001 - preserve GraphRAG failures
             llm = pipeline.runner.config.llm_config["default"].root
             response_path = save_invalid_llm_response(
@@ -58,7 +58,8 @@ async def run_fixture(path: Path) -> dict[str, Any]:
             raise
         return {
             "status": "succeeded",
-            "run_id": result.run_id,
+            "run_id": ingested.result.run_id if ingested.result is not None else None,
+            "reused": ingested.reused,
             "fixture": str(path),
             "chunk_id": request.chunk_id,
             "record_id": request.record_id,
@@ -66,7 +67,7 @@ async def run_fixture(path: Path) -> dict[str, Any]:
             "provider": type(model_settings).__name__.removesuffix("Settings").lower(),
             "llm_model": model_settings.llm_model,
             "embedding_model": model_settings.embedding_model,
-            "result_type": type(result.result).__name__,
+            "result_type": type(ingested.result.result).__name__ if ingested.result is not None else None,
         }
     finally:
         connection.close()

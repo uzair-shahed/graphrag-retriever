@@ -18,6 +18,7 @@ from graphrag_pipeline.ingestion.load_musique_dataset import (
     count_fully_succeeded_records,
     run_requests,
 )
+from graphrag_pipeline.ingestion.reconcile import ABSENT, COMPLETE, ChunkState
 
 
 def make_request(record_id: str, paragraph_idx: int) -> ExtractionRequest:
@@ -41,8 +42,9 @@ def make_request(record_id: str, paragraph_idx: int) -> ExtractionRequest:
 
 @patch("graphrag_pipeline.ingestion.load_musique_dataset.build_simple_kg_pipeline")
 @patch("graphrag_pipeline.ingestion.load_musique_dataset.Neo4jConnection")
+@patch("graphrag_pipeline.ingestion.load_musique_dataset.classify_chunk", side_effect=[ChunkState(s) for s in [ABSENT, COMPLETE, ABSENT, COMPLETE, ABSENT, ABSENT, COMPLETE]])
 def test_run_requests_counts_records_with_a_failing_chunk_as_not_succeeded(
-    mock_connection_cls: MagicMock, mock_build_pipeline: MagicMock
+    mock_classify: MagicMock, mock_connection_cls: MagicMock, mock_build_pipeline: MagicMock
 ) -> None:
     """A record with any failed chunk is excluded from the succeeded-record count."""
     mock_connection = MagicMock()
@@ -84,7 +86,9 @@ def test_run_requests_counts_records_with_a_failing_chunk_as_not_succeeded(
 @patch("graphrag_pipeline.ingestion.load_musique_dataset.save_invalid_llm_response")
 @patch("graphrag_pipeline.ingestion.load_musique_dataset.build_simple_kg_pipeline")
 @patch("graphrag_pipeline.ingestion.load_musique_dataset.Neo4jConnection")
+@patch("graphrag_pipeline.ingestion.load_musique_dataset.classify_chunk", return_value=ChunkState(ABSENT))
 def test_run_requests_records_invalid_response_path(
+    mock_classify: MagicMock,
     mock_connection_cls: MagicMock,
     mock_build_pipeline: MagicMock,
     mock_save_response: MagicMock,

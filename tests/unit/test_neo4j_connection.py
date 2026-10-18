@@ -168,6 +168,26 @@ def test_non_retryable_errors_are_not_retried(fake_driver: _FakeDriver) -> None:
     assert fake_driver.transactions[0].rolled_back is True
 
 
+def test_multiple_queries_share_one_atomic_transaction(fake_driver):
+    fake_driver.queue_response([{"first": 1}])
+    fake_driver.queue_response([{"second": 2}])
+    connection = Neo4jConnection(_settings())
+
+    def operation(tx):
+        list(tx.run("FIRST", {}))
+        return [r.data() for r in tx.run("SECOND", {})]
+
+    assert connection.run_transaction(operation) == [{"second": 2}]
+    assert len(fake_driver.transactions) == 1
+    assert fake_driver.transactions[0].committed
+
+
+def test_borrowed_driver_is_not_closed_by_writer_connection(fake_driver):
+    connection = Neo4jConnection(_settings(), driver=fake_driver)
+    connection.close()
+    assert not fake_driver.closed
+
+
 def test_connect_reuses_existing_driver(fake_driver: _FakeDriver) -> None:
     connection = Neo4jConnection(_settings())
 

@@ -2,20 +2,17 @@
 - I have noticed that if the 'OPENROUTER_LLM_MAX_TOKENS' option in .env is not high enough, the JSON output produced by the LLM can be cut-off and therefore is invalid. It is important to keep it high enough to avoid any errors.
 
 ### How does neo4j's KGPipeline chunk text from 1 paragraph?
-The splitter is configured generically because SimpleKGPipeline also accepts entire files and long documents. It needs to break arbitrary input into manageable units for:
+The application's `ParagraphSplitter` preserves each validated MuSiQue paragraph
+as exactly one unchanged extraction Chunk, including leading/trailing whitespace
+and paragraphs longer than 10,000 characters. The FREE schema avoids an automatic
+schema-generation call. A new paragraph normally needs one extraction call and
+one embedding call; a verified replay needs neither.
 
-- LLM context limits;
-- one extraction call per chunk;
-- chunk embeddings;
-- independent graph extraction and processing.
-
-For my current loader, the important consequence is:
-    one MuSiQue paragraph
-        -> one ExtractionRequest
-        -> potentially multiple Neo4j TextChunk objects
-        -> one extraction LLM call per TextChunk
-
-So a paragraph of 8,000 characters may produce roughly three extraction chunks, and therefore roughly three extraction calls. With OpenRouter automatic schema extraction still enabled, the pipeline may also perform a schema-generation call for the input before those extraction calls.
+`GRAPH_RAG_CHUNK_SIZE` and `GRAPH_RAG_CHUNK_OVERLAP` remain accepted configuration
+fields but do not split this paragraph-ingestion path. The whole paragraph must
+fit the chosen extraction and embedding models' input limits. A provider limit
+or extraction failure is reported without a partial graph commit; the loader
+does not silently truncate or subdivide the paragraph.
 
 ### GraphRAG retrieval prerequisites
 
@@ -318,12 +315,13 @@ path or deliberately use `--fresh-manifest`.
 
 Chunk states are `pending`, `in_flight`, `verified`, `failed`, and
 `needs_investigation`. Before extraction, state is flushed as `in_flight`.
-After the pipeline finishes, Chunk provenance is synchronized from its Document
-and read back from Neo4j; only a matching complete result becomes `verified`.
+The atomic writer commits source nodes, extracted graph, embeddings, copied
+Chunk provenance and a versioned completion record together. The graph is read
+back and checked against that record; only an intact result becomes `verified`.
 A record becomes loaded only when every expected paragraph is verified.
 On every resume, Neo4j takes precedence over the manifest: matching complete
 chunks skip extraction and embedding calls, absent chunks are ingested, and
-partial or conflicting chunks are reported and skipped. A write that completed
+legacy, partial or conflicting chunks are reported and skipped. A write that completed
 before its checkpoint can therefore be detected without another provider call.
 
 Press Ctrl-C once (or send SIGTERM) to request a clean stop. The current
@@ -363,15 +361,92 @@ cleaning them up; a later run ingests a chunk only after it classifies absent.
 Failed chunks are checked again on the next run; there is currently no durable
 retry queue or automatic bounded retry/backoff policy at the chunk level.
 
-Use one ingestion writer at a time. Task 13's database-level idempotency guard
-is not yet implemented. Verification currently expects one full-text Chunk per
-paragraph: paragraphs exceeding `GRAPH_RAG_CHUNK_SIZE` (default `10000`) can be
-split and reported partial. Splitter sizing remains Task 13 work.
+Use one ingestion writer at a time. Source-scoped unique node keys, per-type
+unique relationship keys and a unique `IngestionCompletion.chunk_id` enforce
+the atomic write boundary. Concurrent ingestion remains outside the supported
+contract. Enabling an entity resolver would add graph mutations outside this
+transaction and requires a new design and validation; it remains disabled.
 
 Query `--preload` uses the same automatic manifest/reconciliation path, with one
 default file per checksum and split when multiple sources are selected. It
 does not expose the batch loader's manifest override/fresh-state flags or its
 clean-stop signal handler. Query-only runs do not invoke ingestion.
+
+#### Atomic ingestion identity and legacy data
+
+Identity uses the existing application `chunk_id` plus an exact canonical
+fingerprint of the validated request: text, title, record/document IDs, paragraph
+index and every source provenance field. Stored source text and provenance are
+also compared directly. Changing a source file path, checksum, split or line
+under an existing chunk ID is a conflict, even when the paragraph text matches.
+Changing the manifest path does not bypass this check.
+
+The custom writer supplied to `SimpleKGPipeline` uses one bounded transaction
+for all source nodes, entities, source/domain relationships, vectors and the
+completion record. Scoped keys retain the normal Document/Chunk/entity labels
+and relationship types used by retrieval. The completion stores contract
+version 1, the exact request, fingerprint and canonical node/relationship
+inventory, including properties and embeddings. Verification detects missing,
+modified or additional source-owned graph effects before skipping provider work.
+This inventory increases database storage and verification work per paragraph.
+
+The writer creates and verifies `ingestion_completion_chunk`,
+`ingestion_node_key`, and `ingestion_rel_<type-hash>` uniqueness constraints as
+needed. The connected user needs schema-write privileges. Existing conflicting
+constraint names or duplicate managed keys fail explicitly. Setup does not
+backfill or relabel legacy nodes. Constraints ignore legacy properties that
+are absent. The tested baseline is Neo4j Enterprise 2026.08.1 with
+`neo4j-graphrag` 1.21.0; other server versions need compatibility validation.
+
+Neo4j reconciliation reports:
+
+| State | Behavior |
+| --- | --- |
+| `absent` | No known source, completion or managed graph; ingestion may proceed. |
+| `complete` | Source and versioned graph inventory match; skip provider work. |
+| `legacy_unverified` | Matching lexical source without atomic completion; preserve and report for investigation. |
+| `partial` | Missing source structure, orphan Chunk or inventory/version mismatch; preserve and report. |
+| `conflict` | Reused identity with changed input or duplicate source identity; preserve and report. |
+
+Every unresolved state keeps the parent record incomplete and produces
+`needs_investigation` in the local manifest. Old manifests marked verified do
+not certify old graph data under this stronger contract. There is no automatic
+legacy adoption, destructive repair, or migration command. Back up the affected
+data and inspect its source/graph ownership before deciding on a separate repair
+or isolated rebuild. Orphan legacy entities without any source identity cannot
+be retrospectively attributed by this mechanism.
+
+The same validated boundary is used by batch loading, query preload and
+`extraction.run_fixture`, including callers without manifests. A stop before
+commit rolls back the whole graph. A stop after commit but before checkpoint
+is recovered by verifying Neo4j and skipping provider work. Transaction retries
+reuse prepared model output; a lost commit acknowledgment reconciles the
+database before retrying writes. These are transaction-level retries, not
+Task 12's future durable failed-chunk queue.
+
+#### Repeatable idempotency acceptance tests
+
+Run against a quiet configured Neo4j database with no concurrent ingestion:
+
+```sh
+RUN_TASK13_ATOMIC_TESTS=1 TASK13_EVIDENCE_DIR=runs/task13-final .venv/bin/python -m pytest tests/integration/test_atomic_ingestion.py -q
+```
+
+The suite uses real Neo4j and the actual pipeline with deterministic LLM and
+embedding doubles, so it needs no provider services or paid calls. It covers
+schema uniqueness, legacy preservation, replay, changed source input, graph
+tampering, long paragraphs, rollback at each write stage, transaction retries,
+lost commit acknowledgment, real subprocess restart, missing/fresh manifests,
+and batch/preload/fixture behavior. It cleans UUID-scoped fixture data and any
+constraints it created, and checks the original graph snapshot is unchanged.
+Sanitized per-test evidence is saved to the selected directory.
+
+Without explicit opt-in these tests skip. Once enabled, unavailable Neo4j or
+invalid configuration fails rather than silently passing acceptance. PowerShell
+users can set `$env:RUN_TASK13_ATOMIC_TESTS='1'` and
+`$env:TASK13_EVIDENCE_DIR='runs/task13-final'`, then run
+`uv run --locked python -m pytest tests/integration/test_atomic_ingestion.py -q`.
+The default deterministic check remains `uv run --locked python -m pytest tests/unit -q`.
 
 #### Query or preload selected records
 

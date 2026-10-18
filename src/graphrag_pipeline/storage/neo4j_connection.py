@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 
 from neo4j import READ_ACCESS, WRITE_ACCESS, Driver, GraphDatabase, Session
 from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
@@ -18,6 +18,7 @@ from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 from graphrag_pipeline.config import Neo4jSettings
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 # Failures worth retrying: the server/cluster is temporarily unavailable or
 # the transaction hit a transient conflict. Everything else (auth, schema,
@@ -28,10 +29,11 @@ _RETRYABLE_EXCEPTIONS = (ServiceUnavailable, SessionExpired, TransientError)
 class Neo4jConnection:
     """Wraps a Neo4j `Driver` with bounded timeouts and bounded retries."""
 
-    def __init__(self, settings: Neo4jSettings, max_retries: int = 3) -> None:
+    def __init__(self, settings: Neo4jSettings, max_retries: int = 3, *, driver: Driver | None = None) -> None:
         self._settings = settings
         self._max_retries = max_retries
-        self._driver: Optional[Driver] = None
+        self._driver: Optional[Driver] = driver
+        self._owns_driver = driver is None
 
     def connect(self) -> Driver:
         """Lazily create the driver. Does not open a network connection yet."""
@@ -48,7 +50,7 @@ class Neo4jConnection:
         self.connect().verify_connectivity()
 
     def close(self) -> None:
-        if self._driver is not None:
+        if self._driver is not None and self._owns_driver:
             self._driver.close()
             self._driver = None
 
@@ -76,7 +78,17 @@ class Neo4jConnection:
         parameters: Optional[dict[str, Any]],
         access_mode: str,
     ) -> list[dict[str, Any]]:
-        parameters = parameters or {}
+        return self.run_transaction(
+            lambda tx: [record.data() for record in tx.run(query, parameters or {})],
+            access_mode=access_mode,
+        )
+
+    def run_transaction(self, operation: Callable[[Any], T], *, access_mode: str = WRITE_ACCESS) -> T:
+        """Run all callback queries atomically; callbacks may be replayed after transient errors.
+
+        Keep provider calls outside this boundary. A lost commit acknowledgment
+        must be reconciled by the callback's database identity guard on retry.
+        """
         deadline = time.monotonic() + self._settings.max_transaction_retry_time_seconds
         attempt = 0
 
@@ -88,12 +100,17 @@ class Neo4jConnection:
                         timeout=self._settings.transaction_timeout_seconds
                     )
                     try:
-                        result = transaction.run(query, parameters)
-                        records = [record.data() for record in result]
+                        value = operation(transaction)
                         transaction.commit()
-                        return records
-                    except Exception:
-                        transaction.rollback()
+                        return value
+                    except BaseException:
+                        try:
+                            transaction.rollback()
+                        except Exception:
+                            # A commit can succeed before its acknowledgment is
+                            # lost. Rollback of that closed transaction must not
+                            # hide the original retryable/interrupt exception.
+                            logger.debug("Rollback unavailable after transaction failure", exc_info=True)
                         raise
             except _RETRYABLE_EXCEPTIONS as error:
                 remaining_seconds = deadline - time.monotonic()

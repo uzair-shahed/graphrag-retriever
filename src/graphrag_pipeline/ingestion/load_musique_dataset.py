@@ -35,14 +35,14 @@ from graphrag_pipeline.diagnostics import (
     save_invalid_llm_response,
 )
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
-from graphrag_pipeline.extraction.plugin_input import build_plugin_input
+from graphrag_pipeline.extraction.ingest import ingest_paragraph
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
 from graphrag_pipeline.ingestion.progress_manifest import (
     DEFAULT_STATE_DIR,
     ManifestError,
     ManifestStore,
 )
-from graphrag_pipeline.ingestion.reconcile import COMPLETE, CONFLICT, PARTIAL, classify_chunk
+from graphrag_pipeline.ingestion.reconcile import COMPLETE, classify_chunk
 from graphrag_pipeline.ingestion.record_adapter import (
     RecordAdapterError,
     build_requests_for_record,
@@ -187,40 +187,6 @@ def format_duration(seconds: float) -> str:
 def measure_duration_seconds(start: float) -> float:
     """Return the elapsed seconds since a ``time.perf_counter()`` start value."""
     return time.perf_counter() - start
-
-
-def synchronize_chunk_provenance(connection: Neo4jConnection, chunk_id: str) -> None:
-    """Copy application provenance from a plugin Document onto its Chunk nodes.
-
-    Args:
-        connection: Neo4j connection used for the bounded write.
-        chunk_id: Application chunk ID stored on the plugin-created Document.
-
-    Effects:
-        Makes chunk-level retrieval results self-describing for the vector
-        retriever and read-only provenance verifier.
-
-    Raises:
-        RuntimeError: If the plugin-created document cannot be found.
-    """
-    rows = connection.run_write(
-        """
-        MATCH (c:Chunk)-[:FROM_DOCUMENT]->(d:Document)
-        WHERE d.chunk_id = $chunk_id
-        SET c.chunk_id = d.chunk_id,
-            c.record_id = d.record_id,
-            c.document_id = d.document_id,
-            c.source_file = d.source_file,
-            c.source_line = d.source_line,
-            c.source_sha256 = d.source_sha256,
-            c.paragraph_idx = d.paragraph_idx,
-            c.title = d.title
-        RETURN count(c) AS chunks
-        """,
-        {"chunk_id": chunk_id},
-    )
-    if not rows or rows[0].get("chunks", 0) < 1:
-        raise RuntimeError(f"plugin-created document not found for chunk {chunk_id!r}")
 
 
 def derive_source_split(dataset_path: Path) -> str:
@@ -375,11 +341,10 @@ async def run_requests(
     succeed. This assumes ``requests`` groups each record's chunks together,
     which is how ``collect_requests`` builds the list.
 
-    When ``store`` is supplied, progress is persisted and resumed: each chunk
-    is first reconciled against Neo4j (``complete`` chunks are skipped without
-    provider work, ``partial``/``conflict`` chunks are reported and skipped),
-    the chunk is flushed as ``in_flight`` before the pipeline call, and it is
-    marked ``verified`` only after its Neo4j state classifies as ``complete``.
+    Every chunk is reconciled against Neo4j, even without a local store.
+    Complete atomic writes skip provider work; legacy/partial/conflict data is
+    reported for investigation. With a store, absent work is flushed in-flight
+    before the call and verified only after atomic graph inventory validation.
     ``stop_requested`` is polled before starting each chunk so a clean stop
     never abandons a chunk that is already running.
     """
@@ -399,7 +364,7 @@ async def run_requests(
     connection = Neo4jConnection(neo4j_settings)
     try:
         driver = connection.connect()
-        pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
+        pipeline = build_simple_kg_pipeline(driver, openrouter_settings, neo4j_settings=neo4j_settings)
         progress = tqdm(
             total=len(requests),
             desc="Loading MuSiQue chunks",
@@ -421,33 +386,26 @@ async def run_requests(
 
                 manifest = store.for_request(request) if store is not None else None
 
-                if manifest is not None:
-                    state = classify_chunk(connection, request)
-                    if state.state == COMPLETE:
-                        manifest.mark_verified(request.chunk_id)
+                try:
+                    ingested = await ingest_paragraph(
+                        connection, pipeline, request, classify=classify_chunk,
+                        before_write=(lambda: manifest.mark_in_flight(request.chunk_id)) if manifest is not None else None,
+                    )
+                    if ingested.reused:
+                        if manifest is not None:
+                            manifest.mark_verified(request.chunk_id)
                         outcome.skipped_verified.append(request.chunk_id)
                         progress.update(1)
                         continue
-                    if state.state in (PARTIAL, CONFLICT):
-                        report = state.to_report(request)
-                        manifest.mark_needs_investigation(request.chunk_id, report)
+                    if ingested.state.state != COMPLETE:
+                        report = ingested.state.to_report(request)
+                        if manifest is not None:
+                            manifest.mark_needs_investigation(request.chunk_id, report)
                         outcome.needs_investigation.append(report)
                         current_record_failed = True
                         progress.update(1)
                         progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
                         continue
-                    manifest.mark_in_flight(request.chunk_id)
-
-                text, document_metadata = build_plugin_input(request)
-                try:
-                    result = await pipeline.run_async(text=text, document_metadata=document_metadata)
-                    synchronize_chunk_provenance(connection, request.chunk_id)
-                    if manifest is not None:
-                        written = classify_chunk(connection, request)
-                        if written.state != COMPLETE:
-                            raise RuntimeError(
-                                f"post-write Neo4j verification failed ({written.state}): {written.reason}"
-                            )
                 except Exception as error:  # noqa: BLE001 - recorded, not swallowed
                     current_record_failed = True
                     failure = {
@@ -473,7 +431,7 @@ async def run_requests(
                         {
                             "chunk_id": request.chunk_id,
                             "record_id": request.record_id,
-                            "run_id": result.run_id,
+                            "run_id": ingested.result.run_id,
                         }
                     )
                 progress.update(1)

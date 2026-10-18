@@ -501,6 +501,42 @@ does not establish Task 13's database-level idempotent-write guarantee.
   split into several chunks and be classified `partial` (Task 13 plans to size
   the splitter to the longest paragraph).
 
+### Task 13 — Idempotent paragraph ingestion (2026-10-18)
+
+**Status:** IMPLEMENTATION AND VALIDATION COMPLETE; ready for user acceptance.
+After 13.1 the user authorized completing all remaining subtasks together,
+superseding the original per-subtask stops.
+See [the implementation sequence and writer evidence](task-13-remainder-plan.md).
+
+- Added opt-in live characterization tests using the actual stock
+  `SimpleKGPipeline`, deterministic LLM/embedding doubles, and real Neo4j.
+- Identical paragraph replay doubled Documents, Chunks, extracted entities,
+  source/domain relationships and embeddings. Same-name entities remained
+  separate with the configured resolver disabled.
+- Injecting a relationship-write client error left five committed nodes and
+  returned writer `FAILURE` without raising, even with extraction
+  `on_error="RAISE"`.
+- Replaced production persistence with a custom atomic `KGWriter`: source
+  nodes, entities, relationships, embeddings, copied provenance and versioned
+  completion inventory share one bounded transaction. Scoped database unique
+  keys protect the identity boundary; writer failures roll back and raise.
+- Added exact canonical request fingerprints and one unchanged full-paragraph
+  Chunk. Reused IDs with changed text/provenance conflict. Legacy, partial and
+  damaged graph data is preserved for investigation instead of certified.
+- Batch, query preload and fixture commands share mandatory reconciliation,
+  even without a manifest. Real subprocess tests proved pre-commit rollback,
+  post-commit/pre-checkpoint recovery without provider work, and safe reuse
+  with missing/fresh manifests. Entity resolution remains disabled.
+- **277 unit tests and 21 live tests passed**, with no skipped acceptance tests.
+  Replay, direct writer reuse, malformed graphs, uniqueness, schema mismatch,
+  transient retry, lost commit acknowledgment, changed input and graph tampering
+  are covered. An independent raw-Cypher source/graph audit passed.
+- All live fixture cleanup snapshot hashes matched the original graph.
+  Sanitized evidence: `runs/task13-final/validation-summary.json` and per-test
+  reports. `git diff --check` passed. No legacy migration or reset was performed.
+- Sequential ingestion remains the supported contract. Task 12 has not started;
+  user acceptance of Task 13 has not been presumed.
+
 ## Goal
 
 Harden the existing Neo4j GraphRAG and VectorRAG question-to-answer path.

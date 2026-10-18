@@ -198,13 +198,20 @@ command after a stop: the loader checks Neo4j, skips matching complete chunks
 without provider calls, and processes pending work. A record is loaded only
 after every expected paragraph has been verified.
 
+Each paragraph's source nodes, entities, relationships, embedding, provenance,
+and completion record now commit in one Neo4j transaction. Replaying the same
+input verifies and reuses that graph. A changed input under the same chunk ID
+is a conflict. Older graph data without an atomic completion record is preserved
+and reported as `legacy_unverified`; it requires investigation before reuse.
+The loader does not automatically repair or certify legacy data.
+
 Press Ctrl-C once to finish the current chunk and exit with code `130`; wait
 for the JSON summary. A second Ctrl-C interrupts immediately, leaving the
 in-flight chunk for reconciliation on resume. `--manifest-path PATH` overrides
 the state file; `--fresh-manifest` moves existing state aside and starts a new
 manifest while still reconciling Neo4j. A changed source checksum or split
 cannot reuse the old manifest silently. Keep ingestion sequential: concurrent
-writer protection and a durable failed-chunk retry queue are separate tasks.
+writer support and a durable failed-chunk retry queue remain separate work.
 See [resume and recovery details](documentation.md#resume-stop-and-local-state)
 for state lifecycle, partial/conflicting data, limitations, and exit codes.
 

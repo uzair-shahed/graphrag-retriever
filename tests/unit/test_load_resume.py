@@ -19,6 +19,8 @@ from graphrag_pipeline.extraction.schemas import ExtractionRequest, Provenance
 from graphrag_pipeline.ingestion.load_musique_dataset import RunOutcome, run_requests
 from graphrag_pipeline.ingestion.progress_manifest import ManifestStore
 from graphrag_pipeline.ingestion.reconcile import ABSENT, COMPLETE, PARTIAL, ChunkState
+from graphrag_pipeline.ingestion.reconcile import CONFLICT, LEGACY
+import pytest
 
 MODULE = "graphrag_pipeline.ingestion.load_musique_dataset"
 
@@ -92,7 +94,6 @@ def run(world: FakeWorld, requests, manifest_path: Path, **kwargs):
         patch(f"{MODULE}.Neo4jConnection"),
         patch(f"{MODULE}.build_simple_kg_pipeline", return_value=world.pipeline()),
         patch(f"{MODULE}.classify_chunk", side_effect=world.classify),
-        patch(f"{MODULE}.synchronize_chunk_provenance"),
         patch(f"{MODULE}.save_invalid_llm_response", return_value=None),
     ):
         result = asyncio.run(
@@ -271,3 +272,21 @@ def test_changed_dataset_checksum_does_not_reuse_old_progress(tmp_path: Path) ->
     with pytest.raises(ManifestSourceMismatch):
         run(world, [make_request("r1", 0, sha="b" * 64)], path)
     assert world.calls == []
+
+
+@pytest.mark.parametrize("state", [COMPLETE, LEGACY, PARTIAL, CONFLICT])
+def test_no_manifest_still_reconciles_without_provider_work(state):
+    world = FakeWorld()
+    request = make_request("r1", 0)
+    world.graph[request.chunk_id] = state
+    outcome = RunOutcome()
+    with (
+        patch(f"{MODULE}.Neo4jConnection"),
+        patch(f"{MODULE}.build_simple_kg_pipeline", return_value=world.pipeline()),
+        patch(f"{MODULE}.classify_chunk", side_effect=world.classify),
+    ):
+        succeeded, failed = asyncio.run(run_requests([request], MagicMock(), MagicMock(),
+                                        show_progress=False, store=None, outcome=outcome))
+    assert not world.calls and not succeeded and not failed
+    assert bool(outcome.skipped_verified) == (state == COMPLETE)
+    assert bool(outcome.needs_investigation) == (state != COMPLETE)
