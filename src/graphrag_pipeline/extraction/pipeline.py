@@ -13,14 +13,15 @@ from __future__ import annotations
 
 from neo4j import Driver
 from neo4j_graphrag.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
+from neo4j_graphrag.components.types import Neo4jGraph
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
 from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
-from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.llm import OpenAILLM
 
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings, model_settings_from_env
 from graphrag_pipeline.extraction.debug_llm import DebuggableOpenAILLM
+from graphrag_pipeline.ollama_json_schema import OllamaJSONSchemaLLM
 
 
 def build_simple_kg_pipeline(
@@ -70,12 +71,10 @@ def build_simple_kg_pipeline(
         )
         embedder = OpenAIEmbeddings(model=settings.embedding_model, **client_kwargs)
     else:
-        llm = OllamaLLM(
+        llm = OllamaJSONSchemaLLM(
             model_name=settings.llm_model,
-            model_params={
-                "think": False, # -- Does not need to always be active. Only turn on if using a hybrid model like qwen3:8b
-                "options": {"temperature": 0}
-                },
+            response_model=Neo4jGraph,
+            model_params={"options": {"temperature": 0}},
             host=settings.host,
         )
         embedder = OllamaEmbeddings(model=settings.embedding_model, host=settings.host)

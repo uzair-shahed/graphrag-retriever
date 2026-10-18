@@ -7,7 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from graphrag_pipeline.answer import AnswerSettings, build_answer_llm, generate_answer
+from graphrag_pipeline.answer import (
+    AnswerSettings,
+    GeneratedAnswer,
+    build_answer_llm,
+    generate_answer,
+)
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
 from graphrag_pipeline.query import EvidenceChunk, QueryRequest
 from graphrag_pipeline.retrieval import RetrievalResult
@@ -194,7 +199,9 @@ def test_build_answer_llm_uses_existing_provider_settings() -> None:
         llm_model="local-llm",
         embedding_model="local-embedding",
     )
-    assert build_answer_llm(ollama).model_name == "local-llm"
+    ollama_llm = build_answer_llm(ollama)
+    assert ollama_llm.model_name == "local-llm"
+    assert ollama_llm.response_schema == GeneratedAnswer.model_json_schema()
 
 
 def test_generate_answer_rejects_pregenerated_answer_that_saw_more_than_the_bound() -> None:

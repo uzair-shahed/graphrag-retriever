@@ -10,9 +10,11 @@ query performed by the Neo4j writer.
 from unittest.mock import MagicMock, patch
 
 from neo4j import GraphDatabase
+from neo4j_graphrag.components.types import Neo4jGraph
 
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
+from graphrag_pipeline.ollama_json_schema import OllamaJSONSchemaLLM
 
 
 def openrouter_environment() -> dict[str, str]:
@@ -116,8 +118,10 @@ def test_pipeline_factory_builds_ollama_components() -> None:
 
         llm = pipeline.runner.config.llm_config["default"].root
         embedder = pipeline.runner.config.embedder_config["default"].root
-        assert type(llm).__name__ == "OllamaLLM"
+        assert isinstance(llm, OllamaJSONSchemaLLM)
         assert llm.model_name == "qwen3:4b"
+        assert llm.response_schema == Neo4jGraph.model_json_schema()
+        assert llm.supports_structured_output is True
         assert llm.model_params["options"]["temperature"] == 0
         assert type(embedder).__name__ == "OllamaEmbeddings"
         assert embedder.model == "nomic-embed-text"

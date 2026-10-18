@@ -30,10 +30,11 @@ import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
-from neo4j_graphrag.llm import OllamaLLM, OpenAILLM
+from neo4j_graphrag.llm import OpenAILLM
 
 from graphrag_pipeline.answer_context import ANSWER_PROMPT_TEMPLATE, render_evidence_context
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
+from graphrag_pipeline.ollama_json_schema import OllamaJSONSchemaLLM
 from graphrag_pipeline.query import EvidenceChunk, QueryResponse, QueryRequest
 from graphrag_pipeline.retrieval import RetrievalResult
 
@@ -92,8 +93,9 @@ def build_answer_llm(
             base_url=model_settings.base_url,
             api_key=model_settings.api_key,
         )
-    return OllamaLLM(
+    return OllamaJSONSchemaLLM(
         model_name=model_settings.llm_model,
+        response_model=GeneratedAnswer,
         model_params={"options": {"temperature": 0}},
         host=model_settings.host,
     )

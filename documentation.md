@@ -160,6 +160,21 @@ and lets the application own the final grounded-answer prompt and validation.
 Both paths depend on the same Neo4j vector index, embedding model, chunk
 provenance, and evidence limits.
 
+#### Ollama JSON Schema output
+
+Ollama generation uses `src/graphrag_pipeline/ollama_json_schema.py` to send
+Pydantic schemas through Ollama's native chat `format` field on both synchronous
+answer calls and asynchronous extraction calls. Answer generation uses the
+`GeneratedAnswer` schema; `SimpleKGPipeline` extraction uses Neo4j GraphRAG's
+`Neo4jGraph` schema. Ollama embeddings are unaffected because they return
+vectors, not generated text.
+
+The adapter keeps structural fields constrained while allowing graph labels,
+relationship types, and property-map keys to vary. Returned content is still
+validated by the application and GraphRAG. Schema-constrained generation does
+not prove that extracted facts are correct, that relationship endpoints
+reference existing nodes, or that answer citations support the answer.
+
 ### Grounded answer boundary
 
 The answer-generation boundary is in `src/graphrag_pipeline/answer.py`. It
