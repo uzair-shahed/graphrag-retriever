@@ -20,6 +20,7 @@ class PluginDocumentMetadata(TypedDict):
     document_id: str
     paragraph_idx: str
     title: str | None
+    paragraph_hash: str
 
 
 def build_plugin_input(
@@ -43,4 +44,6 @@ def build_plugin_input(
         "paragraph_idx": str(request.paragraph_idx),
         "title": request.title,
     }
+    if request.paragraph_hash is not None:
+        metadata["paragraph_hash"] = request.paragraph_hash
     return request.text, metadata

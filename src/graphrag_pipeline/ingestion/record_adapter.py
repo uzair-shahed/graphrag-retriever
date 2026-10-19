@@ -3,10 +3,11 @@
 This module is the record-to-chunk boundary described in
 ``agent-coordination/data-contracts.md`` (Contract 1). It reads one official
 MuSiQue JSONL line at a time, validates only the fields the paragraph-as-chunk
-contract needs, and emits one ``ExtractionRequest`` per paragraph. Gold labels
-such as ``is_supporting``, ``answer``, ``answer_aliases``, and
-``question_decomposition`` are accepted on the raw record (so validation does
-not fail because of them) but are never copied into the emitted request.
+contract needs, and emits validated ``ExtractionRequest`` instances identified
+by content hash. Gold labels such as ``is_supporting``, ``answer``,
+``answer_aliases``, and ``question_decomposition`` are accepted on the raw
+record (so validation does not fail because of them) but are never copied
+into the emitted request.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Iterator
 
@@ -22,6 +24,23 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, Validat
 from graphrag_pipeline.extraction.schemas import ExtractionRequest, Provenance
 
 _SLUG_INVALID_CHARS = re.compile(r"[^a-z0-9]+")
+
+
+def normalize_text_whitespace(text: str) -> str:
+    """Normalize whitespace by collapsing CRLF/CR to LF and stripping outer margins."""
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def compute_paragraph_hash(title: str, text: str) -> str:
+    """Compute deterministic content-hash identity from NFC title and text.
+
+    Uses SHA-256 over NFC-normalized title + newline + NFC-normalized text.
+    The paragraph's content, not its record position, is its identity.
+    """
+    nfc_title = unicodedata.normalize("NFC", normalize_text_whitespace(title))
+    nfc_text = unicodedata.normalize("NFC", normalize_text_whitespace(text))
+    content = f"{nfc_title}\n{nfc_text}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 class RawMusiqueParagraph(BaseModel):
@@ -40,6 +59,7 @@ class RawMusiqueRecord(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: StrictStr = Field(min_length=1)
+    question: StrictStr | None = None
     paragraphs: list[RawMusiqueParagraph] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -48,6 +68,17 @@ class RawMusiqueRecord(BaseModel):
         if len(indices) != len(set(indices)):
             raise ValueError(f"record {self.id!r} has duplicate paragraph idx values")
         return self
+
+
+class QuestionContextLink(BaseModel):
+    """Link mapping a question to one of its candidate paragraphs by index and hash."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question_key: StrictStr = Field(min_length=1)
+    question_text: StrictStr = Field(min_length=0)
+    paragraph_idx: StrictInt = Field(ge=0)
+    paragraph_hash: StrictStr = Field(min_length=1)
 
 
 class RecordAdapterError(ValueError):
@@ -117,7 +148,7 @@ def build_requests_for_record(
     source_sha256: str,
     source_split: str,
 ) -> list[ExtractionRequest]:
-    """Adapt one raw MuSiQue JSONL line into one validated chunk per paragraph.
+    """Adapt one raw MuSiQue JSONL line into validated chunks identified by content hash.
 
     Raises:
         RecordAdapterError: If the line is not valid JSON, does not satisfy the
@@ -148,15 +179,93 @@ def build_requests_for_record(
             document_id = f"musique:document:{slugify_title(paragraph.title)}"
         except ValueError as error:
             raise RecordAdapterError(source_line, str(error)) from error
+
+        p_hash = compute_paragraph_hash(paragraph.title, paragraph.paragraph_text)
         requests.append(
             ExtractionRequest(
-                chunk_id=f"musique:{record.id}:paragraph:{paragraph.idx}",
+                chunk_id=f"musique:paragraph:{p_hash}",
                 record_id=record.id,
                 document_id=document_id,
                 paragraph_idx=paragraph.idx,
+                paragraph_hash=p_hash,
                 text=paragraph.paragraph_text,
                 title=paragraph.title,
                 provenance=provenance,
             )
         )
     return requests
+
+
+def build_context_links_for_record(
+    raw_line: str,
+    source_line: int,
+) -> list[QuestionContextLink]:
+    """Extract question-to-paragraph candidate context links from one MuSiQue JSONL line."""
+    try:
+        payload = json.loads(raw_line)
+    except json.JSONDecodeError as error:
+        raise RecordAdapterError(source_line, f"invalid JSON: {error}") from error
+
+    try:
+        record = RawMusiqueRecord.model_validate(payload)
+    except ValidationError as error:
+        raise RecordAdapterError(source_line, f"invalid MuSiQue record shape: {error}") from error
+
+    question_text = record.question or ""
+    links: list[QuestionContextLink] = []
+    for paragraph in record.paragraphs:
+        p_hash = compute_paragraph_hash(paragraph.title, paragraph.paragraph_text)
+        links.append(
+            QuestionContextLink(
+                question_key=record.id,
+                question_text=question_text,
+                paragraph_idx=paragraph.idx,
+                paragraph_hash=p_hash,
+            )
+        )
+    return links
+
+
+def adapt_records_with_deduplication(
+    lines: Iterator[tuple[int, str]],
+    source_file: str,
+    source_sha256: str,
+    source_split: str,
+) -> tuple[list[ExtractionRequest], list[QuestionContextLink], list[dict[str, Any]], int]:
+    """Adapt records into deduplicated ExtractionRequests and complete context links.
+
+    Returns:
+        tuple (unique_requests, all_context_links, dead_letters, records_read)
+    """
+    unique_requests: list[ExtractionRequest] = []
+    seen_hashes: set[str] = set()
+    all_context_links: list[QuestionContextLink] = []
+    dead_letters: list[dict[str, Any]] = []
+    records_read = 0
+
+    for source_line, raw_line in lines:
+        records_read += 1
+        try:
+            record_requests = build_requests_for_record(
+                raw_line=raw_line,
+                source_line=source_line,
+                source_file=source_file,
+                source_sha256=source_sha256,
+                source_split=source_split,
+            )
+            record_links = build_context_links_for_record(
+                raw_line=raw_line,
+                source_line=source_line,
+            )
+        except RecordAdapterError as error:
+            dead_letters.append({"source_line": source_line, "reason": error.reason})
+            continue
+
+        for req in record_requests:
+            if req.paragraph_hash and req.paragraph_hash not in seen_hashes:
+                seen_hashes.add(req.paragraph_hash)
+                unique_requests.append(req)
+
+        all_context_links.extend(record_links)
+
+    return unique_requests, all_context_links, dead_letters, records_read

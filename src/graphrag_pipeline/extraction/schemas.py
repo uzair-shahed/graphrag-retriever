@@ -59,6 +59,7 @@ class ExtractionRequest(BaseModel):
     text: StrictStr = Field(min_length=1)
     title: StrictStr | None = None
     provenance: Provenance
+    paragraph_hash: StrictStr | None = None
 
 
 class EvidenceSpan(BaseModel):

@@ -44,3 +44,12 @@ def test_plugin_input_excludes_gold_and_model_irrelevant_fields() -> None:
     assert "answer" not in payload
     assert "answer_aliases" not in payload
     assert "question_decomposition" not in payload
+
+
+def test_plugin_input_includes_paragraph_hash_when_present() -> None:
+    request = load_request()
+    request.paragraph_hash = "abc123hash"
+
+    _, metadata = build_plugin_input(request)
+    assert metadata["paragraph_hash"] == "abc123hash"
+
