@@ -82,9 +82,8 @@ def _get_neo4j_settings() -> Neo4jSettings:
 
 
 @pytest.mark.live
-@pytest.mark.xfail(strict=True, reason="chunk_id is stored on Document, not Chunk", raises=RetrievalError)
 def test_readme_flow_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Run fixture ingestion, create vector index, and verify retrieval failure."""
+    """Run fixture ingestion, create vector index, and verify end-to-end retrieval."""
     _ensure_gateway_running()
     settings = _get_neo4j_settings()
 
@@ -108,7 +107,7 @@ def test_readme_flow_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
         conn.run_write("CALL db.awaitIndexes(120)")
 
     model_settings = model_settings_from_env()
-    retrieval_settings = RetrievalSettings(mode="vector")
+    retrieval_settings = RetrievalSettings()
 
     with Neo4jConnection(settings) as conn:
         retriever = build_retriever(
@@ -121,5 +120,90 @@ def test_readme_flow_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
             question="What company did Aster Systems acquire in 2021?",
             trace_id="live-test-01",
         )
-        # On HEAD (9f8cc3d), this raises RetrievalError because chunk_id on Chunk is None
-        retrieve(request, retriever, retrieval_settings=retrieval_settings)
+        result = retrieve(request, retriever, retrieval_settings=retrieval_settings)
+        assert result.has_evidence
+        assert len(result.evidence) >= 1
+        assert result.evidence[0].paragraph_hash is not None
+        assert result.evidence[0].chunk_id == f"musique:paragraph:{result.evidence[0].paragraph_hash}"
+        assert "Aster Systems" in result.evidence[0].text
+
+
+@pytest.mark.live
+def test_rerun_one_record_yields_distinct_paragraphs_in_retrieval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rerun one real record (20 paragraphs) through ingestion, then retrieve top 5.
+
+    Confirms deduplication + skip-if-done prevents duplicate copies so the top 5
+    retrieval results hold 5 distinct paragraphs rather than duplicate copies.
+    """
+    from graphrag_pipeline.ingestion.load_musique_dataset import load_dataset
+
+    _ensure_gateway_running()
+    settings = _get_neo4j_settings()
+
+    monkeypatch.setenv("OPENROUTER_BASE_URL", GATEWAY_URL)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-stub-token")
+    monkeypatch.setenv("OPENROUTER_LLM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_DIMENSIONS", "1536")
+    monkeypatch.setenv("GRAPH_RAG_VECTOR_DIMENSIONS", "1536")
+    monkeypatch.setenv("GRAPH_RAG_PROVIDER", "openrouter")
+
+    dataset_path = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
+    if not dataset_path.exists():
+        pytest.skip(f"MuSiQue dataset not found at {dataset_path}")
+
+    # First run: ingest record 1 (20 paragraphs)
+    summary1 = asyncio.run(
+        load_dataset(
+            dataset_path=dataset_path,
+            start_record=1,
+            max_records=1,
+            source_split="dev",
+            dry_run=False,
+            show_progress=False,
+        )
+    )
+    assert len(summary1.chunks_succeeded) == 20 or summary1.chunks_skipped == 20
+
+    # Second run: rerun record 1 -> must skip all 20 ($0 spend)
+    summary2 = asyncio.run(
+        load_dataset(
+            dataset_path=dataset_path,
+            start_record=1,
+            max_records=1,
+            source_split="dev",
+            dry_run=False,
+            show_progress=False,
+        )
+    )
+    assert summary2.chunks_skipped == 20
+
+    # Ensure vector index is online
+    with Neo4jConnection(settings) as conn:
+        conn.run_write(
+            "CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON c.embedding "
+            "OPTIONS {indexConfig: {`vector.dimensions`: 1536, `vector.similarity_function`: 'cosine'}}"
+        )
+        conn.run_write("CALL db.awaitIndexes(120)")
+
+    model_settings = model_settings_from_env()
+    retrieval_settings = RetrievalSettings(top_k=5)
+
+    with Neo4jConnection(settings) as conn:
+        retriever = build_retriever(
+            conn.connect(),
+            settings.database,
+            model_settings,
+            retrieval_settings=retrieval_settings,
+        )
+        request = custom_query(
+            question="When was the company founded?",
+            trace_id="rerun-test-01",
+        )
+        result = retrieve(request, retriever, retrieval_settings=retrieval_settings)
+        assert len(result.evidence) == 5
+        distinct_hashes = {chunk.paragraph_hash for chunk in result.evidence}
+        assert len(distinct_hashes) == 5, f"Expected 5 distinct paragraphs, got {len(distinct_hashes)}"
+

@@ -39,7 +39,7 @@ class RetrievalError(RuntimeError):
 class RetrievalSettings:
     """Bounded configuration for one GraphRAG retrieval call."""
 
-    mode: Literal["vector", "vector_cypher"] = "vector"
+    mode: Literal["vector", "vector_cypher"] = "vector_cypher"
     top_k: int = 5
     max_context_chunks: int = 5
 
@@ -94,11 +94,12 @@ def _format_record(record: Any) -> RetrieverResultItem:
     """Map a raw Neo4j record to text plus provenance metadata."""
     node = _record_value(record, "node")
     if isinstance(node, dict):
-        values = node
+        values = dict(node)
     else:
         values = {
             key: _record_value(record, key)
             for key in (
+                "paragraph_hash",
                 "chunk_id",
                 "text",
                 "document_id",
@@ -110,12 +111,18 @@ def _format_record(record: Any) -> RetrieverResultItem:
                 "title",
             )
         }
+    paragraph_hash = values.get("paragraph_hash") or _record_value(record, "paragraph_hash")
+    if not isinstance(paragraph_hash, str) or not paragraph_hash:
+        raise RetrievalError("retrieval result is missing paragraph_hash")
+
+    chunk_id = f"musique:paragraph:{paragraph_hash}"
+    values["paragraph_hash"] = paragraph_hash
+    values["chunk_id"] = chunk_id
+
     text = values.get("text") or _record_value(record, "text")
-    chunk_id = values.get("chunk_id") or _record_value(record, "chunk_id")
-    if not isinstance(chunk_id, str) or not chunk_id:
-        raise RetrievalError("retrieval result is missing chunk_id")
     if not isinstance(text, str) or not text:
         raise RetrievalError(f"retrieval result for {chunk_id!r} is missing text")
+
     metadata = dict(values)
     metadata.update(
         {
@@ -129,11 +136,17 @@ def _format_record(record: Any) -> RetrieverResultItem:
 def _retrieval_query() -> str:
     """Return the bounded Cypher projection used by VectorCypherRetriever."""
     return (
-        "RETURN node.text AS text, node.chunk_id AS chunk_id, "
-        "node.document_id AS document_id, node.record_id AS record_id, "
-        "node.source_file AS source_file, node.source_line AS source_line, "
-        "node.source_sha256 AS source_sha256, node.paragraph_idx AS paragraph_idx, "
-        "node.title AS title, score"
+        "MATCH (node)-[:FROM_DOCUMENT]->(d:Document) "
+        "RETURN node.text AS text, "
+        "d.paragraph_hash AS paragraph_hash, "
+        "coalesce(d.title, node.title) AS title, "
+        "coalesce(d.document_id, node.document_id) AS document_id, "
+        "coalesce(d.record_id, node.record_id) AS record_id, "
+        "coalesce(d.source_file, node.source_file) AS source_file, "
+        "coalesce(d.source_line, node.source_line) AS source_line, "
+        "coalesce(d.source_sha256, node.source_sha256) AS source_sha256, "
+        "coalesce(d.paragraph_idx, node.paragraph_idx) AS paragraph_idx, "
+        "score"
     )
 
 
@@ -222,6 +235,7 @@ def _evidence_from_item(item: Any) -> EvidenceChunk:
         source_line=source_line,
         score=score,
         graph_references=references,
+        paragraph_hash=metadata.get("paragraph_hash"),
     )
 
 

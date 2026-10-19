@@ -254,7 +254,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-path", action="append", help="JSONL source path; repeat for multiple files.")
     parser.add_argument("--max-records", type=int, help="Bound the selected MuSiQue batch.")
     parser.add_argument("--preload", action="store_true", help="Preload selected MuSiQue records before QA.")
-    parser.add_argument("--retrieval-mode", choices=("vector", "vector_cypher"), default="vector")
+    parser.add_argument("--retrieval-mode", choices=("vector", "vector_cypher"), default="vector_cypher")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--max-context-chunks", type=int, default=5)
     parser.add_argument("--artifact", type=Path, help="Write one JSON artifact per query (numbered for batches).")

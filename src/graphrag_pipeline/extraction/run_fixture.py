@@ -19,7 +19,14 @@ from graphrag_pipeline.extraction.pipeline import (
 )
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
+from graphrag_pipeline.ingestion.record_adapter import compute_paragraph_hash
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
+from graphrag_pipeline.storage.resumable_ingestion import (
+    cleanup_incomplete_paragraph,
+    ensure_paragraph_hash_constraint,
+    load_completed_paragraph_hashes,
+    mark_paragraph_complete,
+)
 
 DEFAULT_FIXTURE = Path("tests/fixtures/musique/extraction_chunk.json")
 
@@ -37,20 +44,39 @@ async def run_fixture(path: Path) -> dict[str, Any]:
     database for inspection.
     """
     request = load_fixture(path)
+    if request.paragraph_hash is None:
+        request.paragraph_hash = compute_paragraph_hash(request.title, request.text)
+        request.chunk_id = f"musique:paragraph:{request.paragraph_hash}"
     text, document_metadata = build_plugin_input(request)
     neo4j_settings = Neo4jSettings.from_env()
     model_settings = model_settings_from_env()
     connection = Neo4jConnection(neo4j_settings)
     try:
-        pipeline = build_simple_kg_pipeline(
-            connection.connect(), model_settings
-        )
+        driver = connection.connect()
+        ensure_paragraph_hash_constraint(driver)
+        completed = load_completed_paragraph_hashes(driver)
+        if request.paragraph_hash in completed:
+            return {
+                "status": "already_completed",
+                "run_id": "cached",
+                "fixture": str(path),
+                "chunk_id": request.chunk_id,
+                "record_id": request.record_id,
+                "database": neo4j_settings.database,
+                "provider": type(model_settings).__name__.removesuffix("Settings").lower(),
+                "llm_model": model_settings.llm_model,
+                "embedding_model": model_settings.embedding_model,
+                "result_type": "CachedResult",
+            }
+        cleanup_incomplete_paragraph(driver, request.paragraph_hash)
+        pipeline = build_simple_kg_pipeline(driver, model_settings)
         try:
             result = await pipeline.run_async(
                 text=text,
                 document_metadata=document_metadata,
             )
             ensure_writer_succeeded(result)
+            mark_paragraph_complete(driver, request.paragraph_hash)
         except Exception as error:  # noqa: BLE001 - preserve GraphRAG failures
             llm = pipeline.runner.config.llm_config["default"].root
             response_path = save_invalid_llm_response(

@@ -89,6 +89,7 @@ class EvidenceChunk(BaseModel):
     source_line: StrictInt | None = Field(default=None, ge=1)
     score: StrictFloat | None = None
     graph_references: list[StrictStr] = Field(default_factory=list)
+    paragraph_hash: StrictStr | None = None
 
 
 class QueryResponse(BaseModel):

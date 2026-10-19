@@ -163,3 +163,50 @@ def test_build_vector_cypher_retriever_uses_ollama_embedder() -> None:
 
     embedder.assert_called_once_with(model="test-embedding", host="http://localhost:11434")
     assert "RETURN node.text" in retriever.call_args.kwargs["retrieval_query"]
+
+
+def test_retrieval_settings_defaults_to_vector_cypher() -> None:
+    """The default retrieval settings must use vector_cypher mode."""
+    settings = RetrievalSettings()
+    assert settings.mode == "vector_cypher"
+    assert settings.top_k == 5
+    assert settings.max_context_chunks == 5
+
+
+def test_retrieval_query_traverses_from_document() -> None:
+    """The Cypher retrieval query must traverse FROM_DOCUMENT to Document node."""
+    from graphrag_pipeline.retrieval import _retrieval_query
+
+    query = _retrieval_query()
+    assert "MATCH (node)-[:FROM_DOCUMENT]->(d:Document)" in query
+    assert "d.paragraph_hash AS paragraph_hash" in query
+    assert "coalesce(d.title, node.title) AS title" in query
+    assert "score" in query
+
+
+def test_format_record_requires_paragraph_hash() -> None:
+    """Records missing paragraph_hash must raise RetrievalError."""
+    from graphrag_pipeline.retrieval import _format_record
+
+    record = {"text": "Valid text but no hash"}
+    with pytest.raises(RetrievalError, match="missing paragraph_hash"):
+        _format_record(record)
+
+
+def test_format_record_builds_chunk_id_from_hash() -> None:
+    """Records with paragraph_hash map to musique:paragraph:{hash} chunk_id."""
+    from graphrag_pipeline.retrieval import _format_record
+
+    record = {
+        "text": "Valid paragraph content",
+        "paragraph_hash": "deadbeef1234",
+        "title": "Document Title",
+        "score": 0.85,
+    }
+    item = _format_record(record)
+    assert item.content == "Valid paragraph content"
+    assert item.metadata["chunk_id"] == "musique:paragraph:deadbeef1234"
+    assert item.metadata["paragraph_hash"] == "deadbeef1234"
+    assert item.metadata["title"] == "Document Title"
+    assert item.metadata["score"] == 0.85
+
