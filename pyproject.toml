@@ -32,3 +32,7 @@ testpaths = ["tests"]
 filterwarnings = [
     "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:neo4j",
 ]
+
+[tool.uv]
+required-version = ">=0.13.1"
+
