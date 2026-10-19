@@ -1,0 +1,33 @@
+{
+  "dataset": "MuSiQue v1.0",
+  "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+  "citation": "Trivedi et al., MuSiQue: Multihop Questions via Single-hop Question Composition, TACL 2022",
+  "generated_at": "2026-10-19T16:16:38.626469+00:00",
+  "files": {
+    "musique_ans_v1.0_dev.jsonl": {
+      "record_count": 2417,
+      "sha256": "15fa63794d18a94ce12411aca6e2327e65b6e83b0b1490efab3f1962e48abf3b",
+      "path": "dataset/musique/data/data/musique_ans_v1.0_dev.jsonl",
+      "verified": true
+    },
+    "musique_ans_v1.0_train.jsonl": {
+      "record_count": 19938,
+      "sha256": "83a75b1e11e4e9bb8f8308e72ac40ca617ae4431b3a0d955b61cab259248490a",
+      "path": "dataset/musique/data/data/musique_ans_v1.0_train.jsonl",
+      "verified": true
+    },
+    "musique_full_v1.0_dev.jsonl": {
+      "record_count": 4834,
+      "sha256": "8cab31d56a3a1c4ef491b205a8dab3f1ac9c66e472098c6cf1de4e20294f7a4a",
+      "path": "dataset/musique/data/data/musique_full_v1.0_dev.jsonl",
+      "verified": true
+    },
+    "musique_full_v1.0_train.jsonl": {
+      "record_count": 39876,
+      "sha256": "b1cd998f7e0e2838d6fda024e4ad1eb0e7fc3edefdadb0bd9b5b10b0907f2034",
+      "path": "dataset/musique/data/data/musique_full_v1.0_train.jsonl",
+      "verified": true
+    }
+  },
+  "all_verified": true
+}

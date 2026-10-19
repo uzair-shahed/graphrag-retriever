@@ -10,6 +10,7 @@ research_notes/
 # Datasets and Large Data Files
 /dataset/*
 !/dataset/README.md
+!/dataset/MANIFEST.json
 data/
 *.parquet
 *.jsonl.gz
