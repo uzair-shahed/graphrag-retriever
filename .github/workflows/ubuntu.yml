@@ -1,0 +1,56 @@
+name: Ubuntu
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.1"
+      - run: uv python install
+      - run: uv sync --locked --extra dev
+      - run: uv run --locked python -m pytest tests/unit -v
+      - run: uv run --locked graphrag-query --help
+
+  live-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      neo4j:
+        image: neo4j:2026.08.1-community
+        env:
+          NEO4J_AUTH: neo4j/changeme
+          NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+          NEO4J_server_memory_heap_max__size: 2G
+          NEO4J_server_memory_pagecache_size: 1G
+        ports:
+          - 7687:7687
+          - 7474:7474
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p changeme 'RETURN 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.1"
+      - run: uv python install
+      - run: uv sync --locked --extra dev
+      - name: Run live integration tests against service container
+        env:
+          REQUIRE_LIVE: "1"
+          NEO4J_URI: "bolt://localhost:7687"
+          NEO4J_USERNAME: "neo4j"
+          NEO4J_PASSWORD: "changeme"
+          NEO4J_DATABASE: "neo4j"
+        run: uv run --locked python -m pytest tests/live -v
