@@ -128,3 +128,32 @@ def test_pipeline_factory_builds_ollama_components() -> None:
         assert pipeline.runner.config.neo4j_database == "neo4j"
     finally:
         driver.close()
+
+
+def test_ensure_writer_succeeded_passes_on_success() -> None:
+    from graphrag_pipeline.extraction.pipeline import ensure_writer_succeeded
+
+    mock_res = MagicMock()
+    mock_res.result = {"writer": {"status": "SUCCESS", "metadata": {}}}
+    # Should not raise
+    ensure_writer_succeeded(mock_res)
+
+
+def test_ensure_writer_succeeded_raises_on_failure() -> None:
+    import pytest
+    from graphrag_pipeline.extraction.pipeline import GraphWriteError, ensure_writer_succeeded
+
+    mock_res = MagicMock()
+    mock_res.result = {"writer": {"status": "FAILURE", "metadata": {"error": "apoc missing"}}}
+    with pytest.raises(GraphWriteError, match="Neo4j writer did not succeed"):
+        ensure_writer_succeeded(mock_res)
+
+
+def test_ensure_writer_succeeded_raises_on_missing_writer() -> None:
+    import pytest
+    from graphrag_pipeline.extraction.pipeline import GraphWriteError, ensure_writer_succeeded
+
+    mock_res = MagicMock()
+    mock_res.result = {}
+    with pytest.raises(GraphWriteError, match="Neo4j writer did not succeed"):
+        ensure_writer_succeeded(mock_res)

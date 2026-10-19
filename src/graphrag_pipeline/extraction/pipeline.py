@@ -23,6 +23,23 @@ from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings, model_s
 from graphrag_pipeline.extraction.debug_llm import DebuggableOpenAILLM
 
 
+class GraphWriteError(RuntimeError):
+    """Raised when the Neo4j writer fails to persist the knowledge graph."""
+
+
+def ensure_writer_succeeded(result: Any) -> None:
+    """Ensure that the Neo4j writer component succeeded, raising GraphWriteError if not.
+
+    The neo4j-graphrag library catches writer exceptions internally and records
+    `status="FAILURE"` in its metadata dictionary rather than re-raising. This function
+    fails closed so failed writes cannot be silently treated as successes.
+    """
+    writer = (getattr(result, "result", None) or {}).get("writer")
+    if not writer or writer.get("status") != "SUCCESS":
+        raise GraphWriteError(f"Neo4j writer did not succeed: {writer!r}")
+
+
+
 def build_simple_kg_pipeline(
     driver: Driver,
     settings: OpenRouterSettings | OllamaSettings | None = None,

@@ -52,10 +52,10 @@ def test_run_requests_counts_records_with_a_failing_chunk_as_not_succeeded(
     pipeline = MagicMock()
     pipeline.run_async = AsyncMock(
         side_effect=[
-            SimpleNamespace(run_id="run-1"),
-            SimpleNamespace(run_id="run-2"),
+            SimpleNamespace(run_id="run-1", result={"writer": {"status": "SUCCESS"}}),
+            SimpleNamespace(run_id="run-2", result={"writer": {"status": "SUCCESS"}}),
             RuntimeError("boom"),
-            SimpleNamespace(run_id="run-4"),
+            SimpleNamespace(run_id="run-4", result={"writer": {"status": "SUCCESS"}}),
         ]
     )
     mock_build_pipeline.return_value = pipeline

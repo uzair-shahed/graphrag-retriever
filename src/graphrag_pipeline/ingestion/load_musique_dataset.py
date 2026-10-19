@@ -33,7 +33,10 @@ from graphrag_pipeline.diagnostics import (
     exception_diagnostics,
     save_invalid_llm_response,
 )
-from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
+from graphrag_pipeline.extraction.pipeline import (
+    build_simple_kg_pipeline,
+    ensure_writer_succeeded,
+)
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
 from graphrag_pipeline.ingestion.record_adapter import (
@@ -311,6 +314,7 @@ async def run_requests(
                 try:
                     pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
                     result = await pipeline.run_async(text=text, document_metadata=document_metadata)
+                    ensure_writer_succeeded(result)
                 except Exception as error:  # noqa: BLE001 - recorded, not swallowed
                     current_record_failed = True
                     failure = {

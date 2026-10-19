@@ -13,7 +13,10 @@ from graphrag_pipeline.diagnostics import (
     exception_diagnostics,
     save_invalid_llm_response,
 )
-from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
+from graphrag_pipeline.extraction.pipeline import (
+    build_simple_kg_pipeline,
+    ensure_writer_succeeded,
+)
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
@@ -47,6 +50,7 @@ async def run_fixture(path: Path) -> dict[str, Any]:
                 text=text,
                 document_metadata=document_metadata,
             )
+            ensure_writer_succeeded(result)
         except Exception as error:  # noqa: BLE001 - preserve GraphRAG failures
             llm = pipeline.runner.config.llm_config["default"].root
             response_path = save_invalid_llm_response(
