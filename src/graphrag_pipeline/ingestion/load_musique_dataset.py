@@ -51,7 +51,7 @@ from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 if TYPE_CHECKING:
     from graphrag_pipeline.query import QueryRequest
 
-DEFAULT_DATASET_PATH = Path("dataset/musique/data/data/musique_full_v1.0_dev.jsonl")
+DEFAULT_DATASET_PATH = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
 
 
 @dataclass
