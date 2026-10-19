@@ -268,3 +268,77 @@ def build_full_report_markdown(
         md_parts.append("")
 
     return "\n".join(md_parts)
+
+
+def generate_baseline_report_v0(
+    slice_path: Path = Path("eval/slices/ans_dev_mvp_v1.json"),
+    output_dir: Path = Path("eval/reports"),
+) -> tuple[Path, Path]:
+    """Run baselines on the slice and generate baseline_v0.json and baseline_v0.md."""
+    from eval.baselines.bm25 import run_baselines_on_slice
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    baseline_data = run_baselines_on_slice(slice_path, split="both")
+
+    json_path = output_dir / "baseline_v0.json"
+    md_path = output_dir / "baseline_v0.md"
+
+    # Save JSON
+    json_path.write_text(json.dumps(baseline_data, indent=2), encoding="utf-8")
+
+    # Systems for markdown table
+    systems = parse_baseline_output_to_systems(baseline_data)
+
+    # Comparisons (e.g. per-question BM25 vs Random-5 on recall_at_5)
+    comparisons = []
+    # Test split comparison
+    bm25_test = next((s for s in systems if s.system_name == "BM25" and s.setting == "per_question" and s.split == "test"), None)
+    rand_test = next((s for s in systems if s.system_name == "Random-5 Floor" and s.split == "test"), None)
+    if bm25_test and rand_test:
+        comp = compare_systems(bm25_test, rand_test, metric="recall_at_5", num_bootstrap=1000, seed=20261018)
+        comp["system_a"] = "BM25 (per-question, test)"
+        comp["system_b"] = "Random-5 (test)"
+        comparisons.append(comp)
+
+    # Tune split comparison
+    bm25_tune = next((s for s in systems if s.system_name == "BM25" and s.setting == "per_question" and s.split == "tune"), None)
+    rand_tune = next((s for s in systems if s.system_name == "Random-5 Floor" and s.split == "tune"), None)
+    if bm25_tune and rand_tune:
+        comp = compare_systems(bm25_tune, rand_tune, metric="recall_at_5", num_bootstrap=1000, seed=20261018)
+        comp["system_a"] = "BM25 (per-question, tune)"
+        comp["system_b"] = "Random-5 (tune)"
+        comparisons.append(comp)
+
+    notes = [
+        f"Evaluation Slice: {baseline_data.get('slice', slice_path.name)} (500 questions: 200 tune, 300 test).",
+        "Setting 1 (per_question): Question searches strictly within its 20 candidate paragraphs (official MuSiQue RC setting).",
+        "Setting 2 (pooled): Question searches across all unique passages in the slice corpus (HippoRAG open-retrieval protocol).",
+        "Cost: $0.00 spend across all baselines.",
+        "Decision rule: Any GraphRAG pipeline or retrieval modification must demonstrate statistically significant improvement over these baselines to justify extraction/embedding cost.",
+    ]
+
+    report_md = build_full_report_markdown(
+        report_title="Baseline Report v0 · Free Keyword & Random Baselines",
+        systems=systems,
+        comparisons=comparisons,
+        notes=notes,
+    )
+    md_path.write_text(report_md, encoding="utf-8")
+    return json_path, md_path
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--slice", type=Path, default=Path("eval/slices/ans_dev_mvp_v1.json"))
+    parser.add_argument("--output-dir", type=Path, default=Path("eval/reports"))
+    args = parser.parse_args()
+
+    json_path, md_path = generate_baseline_report_v0(args.slice, args.output_dir)
+    print(f"Generated baseline reports:")
+    print(f"  JSON: {json_path}")
+    print(f"  Markdown: {md_path}")
+
+
+if __name__ == "__main__":
+    main()
+

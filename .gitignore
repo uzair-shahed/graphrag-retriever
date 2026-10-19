@@ -3,9 +3,10 @@ project-idea-files/*
 agent-coordination/architecture-images/*
 
 # Documentation & Research Notes (Temporary / Working Folders)
-docs/
-reports/
-research_notes/
+/docs/
+/reports/
+/research_notes/
+!eval/reports/
 
 # Datasets and Large Data Files
 /dataset/*
