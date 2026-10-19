@@ -27,7 +27,6 @@ from dataclasses import asdict, dataclass, replace
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Literal
 
-from neo4j_graphrag.generation.graphrag import GraphRAG
 from neo4j_graphrag.indexes import retrieve_vector_index_info
 from neo4j_graphrag.retrievers import VectorCypherRetriever, VectorRetriever
 
@@ -118,7 +117,7 @@ def _api_report() -> dict[str, Any]:
     return {
         "package": "neo4j-graphrag",
         "version": package_version,
-        "graph_rag_search": str(inspect.signature(GraphRAG.search)),
+        "generation": "GraphRAG",
         "vector_retriever": str(inspect.signature(VectorRetriever)),
         "vector_cypher_retriever": str(inspect.signature(VectorCypherRetriever)),
     }
@@ -165,6 +164,16 @@ def _verify_index(
             f"vector index similarity mismatch: expected {settings.similarity}, got {similarity}"
         )
     state = values.get("state")
+    if state is None and hasattr(connection, "run_read"):
+        try:
+            state_rows = connection.run_read(
+                "SHOW INDEXES YIELD name, state WHERE name = $name RETURN state",
+                name=settings.name,
+            )
+            if state_rows:
+                state = state_rows[0].get("state")
+        except Exception:
+            pass
     if state is not None and state != "ONLINE":
         raise RetrievalPrerequisiteError(f"vector index {settings.name!r} is not ONLINE: {state}")
     return {

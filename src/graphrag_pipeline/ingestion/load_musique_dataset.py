@@ -45,6 +45,7 @@ from graphrag_pipeline.ingestion.record_adapter import (
     compute_file_sha256,
     iter_jsonl_lines,
 )
+from graphrag_pipeline.preflight import run_preflight_checks
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 
 if TYPE_CHECKING:
@@ -398,6 +399,11 @@ async def load_dataset(
 
     neo4j_settings = Neo4jSettings.from_env()
     model_settings = model_settings_from_env()
+    run_preflight_checks(
+        neo4j_settings,
+        model_settings,
+        require_vector_index=False,
+    )
 
     run_started_at = time.perf_counter()
     succeeded, failed = await run_requests(
@@ -460,6 +466,12 @@ async def load_selected_records(
 
     resolved_neo4j_settings = neo4j_settings or Neo4jSettings.from_env()
     resolved_model_settings = openrouter_settings or model_settings_from_env()
+    if isinstance(resolved_neo4j_settings, Neo4jSettings):
+        run_preflight_checks(
+            resolved_neo4j_settings,
+            resolved_model_settings if isinstance(resolved_model_settings, (OpenRouterSettings, OllamaSettings)) else None,
+            require_vector_index=False,
+        )
     run_started_at = time.perf_counter()
     succeeded, failed = await run_requests(
         requests,

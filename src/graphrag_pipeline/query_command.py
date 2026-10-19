@@ -42,6 +42,7 @@ from graphrag_pipeline.query import (
     run_query_batch,
     select_queries,
 )
+from graphrag_pipeline.preflight import run_preflight_checks
 from graphrag_pipeline.retrieval import RetrievalError, RetrievalResult, RetrievalSettings, build_retriever, retrieve
 from graphrag_pipeline.retrieval_prerequisites import verify_retrieval_prerequisites
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
@@ -207,6 +208,11 @@ def run_cli(args: argparse.Namespace) -> list[QueryResponse]:
     connection = Neo4jConnection(neo4j_settings)
     connection.verify_connectivity()
     if not args.skip_prerequisite_check:
+        run_preflight_checks(
+            neo4j_settings,
+            model_settings,
+            require_vector_index=True,
+        )
         verify_retrieval_prerequisites(
             connection,
             neo4j_settings,
