@@ -70,7 +70,7 @@ class FakeWorld:
             if chunk_id in self.crash_before_write_on:
                 raise Crash()
             if chunk_id in self.fail_on:
-                raise RuntimeError("provider failure")
+                raise TimeoutError("provider failure")
             if chunk_id not in self.write_nothing_on:
                 self.graph[chunk_id] = COMPLETE
             if chunk_id in self.crash_after_write_on:
@@ -91,6 +91,7 @@ def run(world: FakeWorld, requests, manifest_path: Path, **kwargs):
     outcome = RunOutcome()
     store = ManifestStore(manifest_path=manifest_path)
     with (
+        patch.dict("os.environ", {"INGESTION_RETRY_DELAYS_SECONDS": "[0, 0]"}),
         patch(f"{MODULE}.Neo4jConnection"),
         patch(f"{MODULE}.build_simple_kg_pipeline", return_value=world.pipeline()),
         patch(f"{MODULE}.classify_chunk", side_effect=world.classify),
@@ -253,9 +254,10 @@ def test_verified_manifest_entry_is_reingested_if_neo4j_data_was_removed(tmp_pat
     world.graph.clear()  # operator deleted the nodes after investigating
     world.calls.clear()
 
-    _, _, store = run(world, requests, path)
+    (_, failed), _, store = run(world, requests, path)
 
     assert world.calls == ["musique:r1:paragraph:0"]
+    assert not failed
     assert store.complete_record_ids(requests) == {"r1"}
 
 

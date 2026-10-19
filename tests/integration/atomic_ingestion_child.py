@@ -6,7 +6,6 @@ provider constructors are replaced with deterministic test implementations.
 
 import argparse
 import asyncio
-from dataclasses import asdict
 import json
 import os
 from pathlib import Path
@@ -80,7 +79,7 @@ def main():
             [request], Neo4jSettings.from_env(), OllamaSettings(host="http://unused", llm_model="fixed", embedding_model="fixed"),
             show_progress=False, store=store, outcome=outcome,
         ))
-        report = {"succeeded": succeeded, "failed": failed, "outcome": asdict(outcome),
+        report = {"succeeded": succeeded, "failed": failed, "outcome": outcome.to_dict(),
                   "complete_records": sorted(store.complete_record_ids([request]))}
         print(json.dumps(report))
         raise SystemExit(1 if failed or outcome.needs_investigation else 0)

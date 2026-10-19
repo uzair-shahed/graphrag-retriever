@@ -49,6 +49,8 @@ import sys
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path.cwd() / 'tests/unit'))
+import os
+os.environ["INGESTION_RETRY_DELAYS_SECONDS"] = "[0, 0]"
 from test_load_resume import FakeWorld, four_chunks
 from graphrag_pipeline.ingestion import load_musique_dataset as loader
 

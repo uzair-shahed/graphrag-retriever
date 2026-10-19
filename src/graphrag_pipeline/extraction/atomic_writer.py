@@ -16,6 +16,7 @@ from graphrag_pipeline.extraction.idempotency import (
 )
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
 from graphrag_pipeline.extraction.schemas import ExtractionRequest, Provenance
+from graphrag_pipeline.ingestion.retry_policy import PipelineStageError
 from graphrag_pipeline.ingestion.reconcile import ABSENT, COMPLETE, classify_chunk
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 
@@ -135,9 +136,15 @@ class AtomicKGWriter(KGWriter):
 
     @validate_call
     async def run(self, graph: Neo4jGraph, lexical_graph_config: LexicalGraphConfig = LexicalGraphConfig()) -> KGWriterModel:
-        request, nodes, relationships = prepare_graph(graph, lexical_graph_config)
-        ensure_schema(self.connection, [rel["type"] for rel in relationships])
-        return self.connection.run_transaction(lambda tx: self._write(TransactionConnection(tx), request, nodes, relationships))
+        try:
+            request, nodes, relationships = prepare_graph(graph, lexical_graph_config)
+        except (ValueError, KeyError) as error:
+            raise PipelineStageError("graph_validation", str(error)) from error
+        try:
+            ensure_schema(self.connection, [rel["type"] for rel in relationships])
+            return self.connection.run_transaction(lambda tx: self._write(TransactionConnection(tx), request, nodes, relationships))
+        except Exception as error:
+            raise PipelineStageError("write", str(error)) from error
 
     def _write(self, connection, request, nodes, relationships) -> KGWriterModel:
         state = classify_chunk(connection, request)

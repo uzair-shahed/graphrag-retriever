@@ -35,13 +35,16 @@ from graphrag_pipeline.diagnostics import (
     save_invalid_llm_response,
 )
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
-from graphrag_pipeline.extraction.ingest import ingest_paragraph
+from graphrag_pipeline.extraction.ingest import ingest_paragraph, RetryDeferred
+from graphrag_pipeline.ingestion.run_progress import RunProgress
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
 from graphrag_pipeline.ingestion.progress_manifest import (
     DEFAULT_STATE_DIR,
     ManifestError,
     ManifestStore,
 )
+from graphrag_pipeline.ingestion.retry_queue import QueueError, RetryStore
+from graphrag_pipeline.ingestion.retry_policy import attempt_configuration, classify_failure
 from graphrag_pipeline.ingestion.reconcile import COMPLETE, classify_chunk
 from graphrag_pipeline.ingestion.record_adapter import (
     RecordAdapterError,
@@ -81,6 +84,7 @@ class LoadSummary:
     stopped_early: bool = False
     chunks_not_attempted: int = 0
     manifest_paths: list[str] = field(default_factory=list)
+    progress: RunProgress = field(default_factory=RunProgress)
 
     @property
     def succeeded(self) -> bool:
@@ -90,6 +94,8 @@ class LoadSummary:
             or self.chunks_failed
             or self.chunks_needs_investigation
             or self.stopped_early
+            or self.progress.counts()["chunks_deferred"]
+            or any(row["retry_status"] != "resolved" for row in self.progress.retry_chunks)
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -116,6 +122,7 @@ class LoadSummary:
             "run_seconds": round(self.run_seconds, 3),
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "elapsed": format_duration(self.elapsed_seconds),
+            **self.progress.to_dict(),
         }
 
 
@@ -139,6 +146,7 @@ class PreloadSummary:
     stopped_early: bool = False
     chunks_not_attempted: int = 0
     manifest_paths: list[str] = field(default_factory=list)
+    progress: RunProgress = field(default_factory=RunProgress)
 
     @property
     def succeeded(self) -> bool:
@@ -148,6 +156,8 @@ class PreloadSummary:
             or self.chunks_failed
             or self.chunks_needs_investigation
             or self.stopped_early
+            or self.progress.counts()["chunks_deferred"]
+            or any(row["retry_status"] != "resolved" for row in self.progress.retry_chunks)
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -170,6 +180,7 @@ class PreloadSummary:
             "run_seconds": round(self.run_seconds, 3),
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "elapsed": format_duration(self.elapsed_seconds),
+            **self.progress.to_dict(),
         }
 
 
@@ -319,6 +330,14 @@ class RunOutcome:
     interrupted_in_flight: list[str] = field(default_factory=list)
     stopped_early: bool = False
     not_attempted: int = 0
+    resolved_records: list[str] | None = None
+    progress: RunProgress | None = None
+
+    def to_dict(self):
+        return {"skipped_verified": self.skipped_verified, "needs_investigation": self.needs_investigation,
+                "interrupted_in_flight": self.interrupted_in_flight, "stopped_early": self.stopped_early,
+                "not_attempted": self.not_attempted, "resolved_records": self.resolved_records,
+                "progress": self.progress.to_dict() if self.progress is not None else None}
 
 
 async def run_requests(
@@ -329,6 +348,7 @@ async def run_requests(
     store: ManifestStore | None = None,
     stop_requested: Callable[[], bool] | None = None,
     outcome: RunOutcome | None = None,
+    retry_store: RetryStore | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Send every validated chunk request through the live pipeline in order.
 
@@ -336,10 +356,9 @@ async def run_requests(
     repeated for every paragraph. A failure on one chunk is recorded and does
     not stop the remaining chunks.
 
-    A tqdm progress bar tracks chunk-level progress and reports, as a running
-    postfix, how many records have already had every one of their chunks
-    succeed. This assumes ``requests`` groups each record's chunks together,
-    which is how ``collect_requests`` builds the list.
+    The progress bar counts processed chunks, including failures and deferred
+    entries. The postfix separately counts verified/reused work and complete,
+    partial and unstarted records from their exact expected paragraph IDs.
 
     Every chunk is reconciled against Neo4j, even without a local store.
     Complete atomic writes skip provider work; legacy/partial/conflict data is
@@ -351,20 +370,36 @@ async def run_requests(
     outcome = outcome if outcome is not None else RunOutcome()
     succeeded: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
-    total_records = len({request.record_id for request in requests})
-    records_loaded = 0
-    current_record_id: str | None = None
-    current_record_failed = False
+    counts = RunProgress.start(requests)
+    outcome.progress = counts
 
+    retries = retry_store if retry_store is not None else RetryStore()
+    retries.register(requests, store)
     if store is not None:
-        store.register(requests)
         for manifest in store.manifests():
             outcome.interrupted_in_flight.extend(manifest.interrupted_in_flight)
-
+    # A previous local success cannot complete a record until this invocation
+    # rechecks the graph and resolves all corresponding queue entries.
+    if store is not None:
+        for request in requests:
+            manifest = store.for_request(request)
+            manifest.require_verification(request.chunk_id)
     connection = Neo4jConnection(neo4j_settings)
+    pipeline = None
+    configuration = attempt_configuration(neo4j_settings, openrouter_settings)
     try:
-        driver = connection.connect()
-        pipeline = build_simple_kg_pipeline(driver, openrouter_settings, neo4j_settings=neo4j_settings)
+        try:
+            driver = connection.connect()
+        except Exception as error:
+            for request in requests:
+                retries.for_request(request).record_observation(request.chunk_id, classify_failure(error, "reconcile"), "reconcile")
+            raise
+
+        def get_pipeline():
+            nonlocal pipeline
+            if pipeline is None:
+                pipeline = build_simple_kg_pipeline(driver, openrouter_settings, neo4j_settings=neo4j_settings)
+            return pipeline
         progress = tqdm(
             total=len(requests),
             desc="Loading MuSiQue chunks",
@@ -378,74 +413,72 @@ async def run_requests(
                     outcome.not_attempted = len(requests) - index
                     break
 
-                if request.record_id != current_record_id:
-                    if current_record_id is not None and not current_record_failed:
-                        records_loaded += 1
-                    current_record_id = request.record_id
-                    current_record_failed = False
-
                 manifest = store.for_request(request) if store is not None else None
 
+                queue = retries.for_request(request)
+                previous_attempts = len(queue.snapshot().chunks[request.chunk_id].history)
                 try:
                     ingested = await ingest_paragraph(
-                        connection, pipeline, request, classify=classify_chunk,
+                        connection, None, request, classify=classify_chunk,
+                        retry_queue=queue, configuration=configuration, pipeline_factory=get_pipeline,
                         before_write=(lambda: manifest.mark_in_flight(request.chunk_id)) if manifest is not None else None,
                     )
-                    if ingested.reused:
-                        if manifest is not None:
-                            manifest.mark_verified(request.chunk_id)
-                        outcome.skipped_verified.append(request.chunk_id)
-                        progress.update(1)
-                        continue
+                except (QueueError, ManifestError):
+                    raise
+                except RetryDeferred as error:
+                    failure = {"chunk_id": request.chunk_id, "record_id": request.record_id,
+                               **exception_diagnostics(error)}
+                    if manifest is not None:
+                        manifest.mark_failed(request.chunk_id, failure)
+                    counts.finish(request, "deferred")
+                except Exception as error:  # noqa: BLE001 - already durable in the shared boundary
+                    failure = {"chunk_id": request.chunk_id, "record_id": request.record_id,
+                               **exception_diagnostics(error)}
+                    if pipeline is not None:
+                        try:
+                            llm = pipeline.runner.config.llm_config["default"].root
+                            response_path = save_invalid_llm_response(error, getattr(llm, "last_response", None))
+                            if response_path is not None:
+                                failure["invalid_llm_response"] = response_path.as_posix()
+                        except Exception as diagnostic_error:
+                            failure["diagnostic_error"] = exception_diagnostics(diagnostic_error)
+                    failed.append(failure)
+                    if manifest is not None:
+                        manifest.mark_failed(request.chunk_id, failure)
+                    counts.finish(request, "failed")
+                else:
                     if ingested.state.state != COMPLETE:
                         report = ingested.state.to_report(request)
                         if manifest is not None:
                             manifest.mark_needs_investigation(request.chunk_id, report)
                         outcome.needs_investigation.append(report)
-                        current_record_failed = True
-                        progress.update(1)
-                        progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
-                        continue
-                except Exception as error:  # noqa: BLE001 - recorded, not swallowed
-                    current_record_failed = True
-                    failure = {
-                        "chunk_id": request.chunk_id,
-                        "record_id": request.record_id,
-                        **exception_diagnostics(error),
-                    }
-                    if pipeline is not None:
-                        llm = pipeline.runner.config.llm_config["default"].root
-                        response_path = save_invalid_llm_response(
-                            error,
-                            getattr(llm, "last_response", None),
-                        )
-                        if response_path is not None:
-                            failure["invalid_llm_response"] = response_path.as_posix()
-                    failed.append(failure)
-                    if manifest is not None:
-                        manifest.mark_failed(request.chunk_id, failure)
-                else:
-                    if manifest is not None:
-                        manifest.mark_verified(request.chunk_id)
-                    succeeded.append(
-                        {
-                            "chunk_id": request.chunk_id,
-                            "record_id": request.record_id,
-                            "run_id": ingested.result.run_id,
-                        }
-                    )
+                        counts.finish(request, "investigation")
+                    else:
+                        if manifest is not None:
+                            manifest.mark_verified(request.chunk_id)
+                        if ingested.reused:
+                            outcome.skipped_verified.append(request.chunk_id)
+                            counts.finish(request, "reused")
+                        else:
+                            succeeded.append({"chunk_id": request.chunk_id, "record_id": request.record_id,
+                                              "run_id": ingested.result.run_id})
+                            counts.finish(request, "verified")
+                entry = queue.snapshot().chunks[request.chunk_id]
+                if len(entry.history) > previous_attempts and (previous_attempts or entry.legacy_attempts):
+                    counts.retry_attempts += 1
                 progress.update(1)
-                progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
-
-            else:
-                if current_record_id is not None and not current_record_failed:
-                    records_loaded += 1
-                    progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
+                progress.set_postfix(**counts.postfix())
         finally:
             progress.close()
     finally:
         connection.close()
 
+    counts.capture_queues(requests, retries)
+    by_record: dict[str, list[ExtractionRequest]] = {}
+    for request in requests:
+        by_record.setdefault(request.record_id, []).append(request)
+    outcome.resolved_records = sorted(record_id for record_id, group in by_record.items()
+                                      if all(retries.record_is_resolved(request) for request in group))
     return succeeded, failed
 
 
@@ -488,17 +521,25 @@ async def load_dataset(
         records_read=records_read,
         dead_lettered_records=dead_letters,
         chunks_planned=len(requests),
-        records_planned=len({request.record_id for request in requests}),
+        records_planned=len(RunProgress.start(requests).records),
         collect_seconds=collect_seconds,
+        progress=RunProgress.start(requests),
     )
 
     if dry_run:
         summary.elapsed_seconds = measure_duration_seconds(started_at)
         return summary
 
-    neo4j_settings = Neo4jSettings.from_env()
-    model_settings = model_settings_from_env()
     store = ManifestStore(manifest_path=manifest_path, state_dir=state_dir, fresh=fresh_manifest)
+    retries = RetryStore()
+    retries.register(requests, store)
+    try:
+        neo4j_settings = Neo4jSettings.from_env()
+        model_settings = model_settings_from_env()
+    except Exception as error:
+        for request in requests:
+            retries.for_request(request).record_observation(request.chunk_id, classify_failure(error, "configuration"), "configuration")
+        raise
     outcome = RunOutcome()
 
     run_started_at = time.perf_counter()
@@ -510,6 +551,7 @@ async def load_dataset(
         store=store,
         stop_requested=stop_requested,
         outcome=outcome,
+        retry_store=retries,
     )
     summary.run_seconds = measure_duration_seconds(run_started_at)
 
@@ -533,7 +575,13 @@ def _apply_outcome(
     summary.stopped_early = outcome.stopped_early
     summary.chunks_not_attempted = outcome.not_attempted
     summary.manifest_paths = [str(manifest.path) for manifest in store.manifests()]
-    summary.records_succeeded = len(store.complete_record_ids(requests))
+    complete = store.complete_record_ids(requests)
+    if outcome.resolved_records is not None:
+        complete &= set(outcome.resolved_records)
+    summary.records_succeeded = len(complete)
+    if outcome.progress is not None:
+        summary.progress = outcome.progress
+        summary.records_succeeded = outcome.progress.counts()["records_complete"]
 
 
 async def load_selected_records(
@@ -578,15 +626,23 @@ async def load_selected_records(
         dead_lettered_records=dead_letters,
         chunks_planned=len(requests),
         collect_seconds=collect_seconds,
+        progress=RunProgress.start(requests),
     )
 
     if dry_run or not requests:
         summary.elapsed_seconds = measure_duration_seconds(started_at)
         return summary
 
-    resolved_neo4j_settings = neo4j_settings or Neo4jSettings.from_env()
-    resolved_model_settings = openrouter_settings or model_settings_from_env()
     store = ManifestStore(manifest_path=manifest_path, state_dir=state_dir)
+    retries = RetryStore()
+    retries.register(requests, store)
+    try:
+        resolved_neo4j_settings = neo4j_settings or Neo4jSettings.from_env()
+        resolved_model_settings = openrouter_settings or model_settings_from_env()
+    except Exception as error:
+        for request in requests:
+            retries.for_request(request).record_observation(request.chunk_id, classify_failure(error, "configuration"), "configuration")
+        raise
     outcome = RunOutcome()
     run_started_at = time.perf_counter()
     succeeded, failed = await run_requests(
@@ -596,6 +652,7 @@ async def load_selected_records(
         show_progress=show_progress,
         store=store,
         outcome=outcome,
+        retry_store=retries,
     )
     summary.run_seconds = measure_duration_seconds(run_started_at)
     summary.chunks_succeeded = succeeded
@@ -693,7 +750,7 @@ def main() -> None:
                 stop_requested=lambda: stop_state["requested"],
             )
         )
-    except ManifestError as error:
+    except (ManifestError, QueueError) as error:
         print(json.dumps({"error": str(error)}, indent=2))
         raise SystemExit(2) from error
     print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))

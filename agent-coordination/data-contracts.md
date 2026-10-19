@@ -73,6 +73,30 @@ smoke-check interface and is not sufficient to certify ingestion completion.
 See [the operational identity/recovery contract](../documentation.md#atomic-ingestion-identity-and-legacy-data)
 and [Task 13 evidence](task-13-remainder-plan.md).
 
+### Durable ingestion retries (Task 12, 18 October 2026)
+
+The shared ingestion boundary journals each validated request before provider
+execution. Source-scoped queues preserve expected siblings, exact provenance,
+request fingerprints, attempts, classifications, bounded policies and history.
+Default chunk budgets include one initial call plus two retries after five and
+thirty seconds; provider/transaction retries are separate. Deferred or terminal
+work remains unresolved and keeps its parent record incomplete.
+
+Both ordinary selected-range resume and the `ingestion.retry_chunks` drain
+operation use the same configured pipeline and authoritative Neo4j verification.
+A committed write is reused without another provider call. Unsafe graph state is
+preserved/dead-lettered; explicit requeue never bypasses identity/inventory checks.
+Queue resolution precedes progress verification. Persistence errors stop work;
+optional diagnostics cannot suppress a durable failure. Requeue preserves old
+attempts and starts a distinct bounded cycle for explicitly named dead letters.
+
+Inspection and requeue are offline. Draining can use stored requests without the
+source dataset and verifies every expected sibling before reporting record
+completion. Linked progress state is synchronized only after source/inventory
+validation. Queue state alone is never evidence of graph completeness. See
+[retry operations and lifecycle](../documentation.md#failed-chunk-queue-and-retry-operations)
+for commands, fields, exit codes, legacy handling and tested deployment limits.
+
 The active system does not rely on the archived manual extraction schema as the source of truth. The earlier, more detailed extraction and answer-generation contracts remain useful for historical reference, but they are not active project doctrine.
 
 ## Contract 1: MuSiQue Record To Application Chunk
