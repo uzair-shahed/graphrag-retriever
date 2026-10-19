@@ -1,17 +1,62 @@
+# Project Idea & Coordination Artifacts
 project-idea-files/*
-.DS_Store
+agent-coordination/architecture-images/*
+
+# Documentation & Research Notes (Temporary / Working Folders)
+docs/
+reports/
+research_notes/
+
+# Datasets and Large Data Files
 /dataset/*
 !/dataset/README.md
-agent-coordination/architecture-images/*
+data/
+*.parquet
+*.jsonl.gz
+
+# Secrets and Local Environment Configuration
 .env
 .env.*
 !.env.example
-.venv/
+*.pem
+*.key
+
+# Python Bytecode, Caching, and Build Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
 /build/
 /dist/
 *.egg-info/
-__pycache__/
+*.egg
+.eggs/
+wheels/
+develop-eggs/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Testing, Type Checking, and Linting
 .pytest_cache/
-debugging_logs/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local Database, Runtime Caches, and Logs
+neo4j-data/
 runs/
+debugging_logs/
+*.log
+*.out
+
+# Editor and Tool Configuration
+.DS_Store
+Thumbs.db
 /.vscode/
+.idea/
+.gitnexus/
