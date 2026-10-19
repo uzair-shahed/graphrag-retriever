@@ -31,6 +31,7 @@ jobs:
           NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
           NEO4J_server_memory_heap_max__size: 2G
           NEO4J_server_memory_pagecache_size: 1G
+          NEO4J_db_transaction_timeout: 120s
         ports:
           - 7687:7687
           - 7474:7474
