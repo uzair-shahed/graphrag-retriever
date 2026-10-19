@@ -15,6 +15,7 @@ from graphrag_pipeline.diagnostics import (
 )
 from graphrag_pipeline.extraction.pipeline import (
     build_simple_kg_pipeline,
+    clear_pipeline_store,
     ensure_writer_succeeded,
 )
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
@@ -86,6 +87,8 @@ async def run_fixture(path: Path) -> dict[str, Any]:
             if response_path is not None:
                 print(json.dumps({"invalid_llm_response": response_path.as_posix()}))
             raise
+        finally:
+            clear_pipeline_store(pipeline)
         return {
             "status": "succeeded",
             "run_id": result.run_id,

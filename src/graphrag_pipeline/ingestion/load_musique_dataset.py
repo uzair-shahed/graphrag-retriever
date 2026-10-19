@@ -35,6 +35,7 @@ from graphrag_pipeline.diagnostics import (
 )
 from graphrag_pipeline.extraction.pipeline import (
     build_simple_kg_pipeline,
+    clear_pipeline_store,
     ensure_writer_succeeded,
 )
 from graphrag_pipeline.extraction.plugin_input import build_plugin_input
@@ -308,6 +309,7 @@ async def run_requests(
         ensure_paragraph_hash_constraint(driver)
         completed_hashes = load_completed_paragraph_hashes(driver)
         cleanup_all_incomplete_paragraphs(driver)
+        pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
 
         progress = tqdm(
             total=len(requests),
@@ -340,9 +342,7 @@ async def run_requests(
                     cleanup_incomplete_paragraph(driver, p_hash)
 
                 text, document_metadata = build_plugin_input(request)
-                pipeline = None
                 try:
-                    pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
                     result = await pipeline.run_async(text=text, document_metadata=document_metadata)
                     ensure_writer_succeeded(result)
                     if p_hash:
@@ -372,6 +372,8 @@ async def run_requests(
                             "run_id": result.run_id,
                         }
                     )
+                finally:
+                    clear_pipeline_store(pipeline)
                 progress.update(1)
                 progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
 

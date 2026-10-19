@@ -39,6 +39,25 @@ def ensure_writer_succeeded(result: Any) -> None:
         raise GraphWriteError(f"Neo4j writer did not succeed: {writer!r}")
 
 
+def clear_pipeline_store(pipeline: Any) -> None:
+    """Clear in-memory intermediate and final result stores from a SimpleKGPipeline.
+
+    neo4j-graphrag accumulates component outputs in `runner.pipeline.store` and
+    `runner.pipeline.final_results` across runs on the same pipeline instance.
+    Because finished paragraph runs are never read again, emptying these stores
+    bounds memory to O(1) across thousands of dataset records.
+    """
+    runner = getattr(pipeline, "runner", None)
+    inner = getattr(runner, "pipeline", None)
+    if inner is not None:
+        store = getattr(inner, "store", None)
+        if store is not None and hasattr(store, "empty"):
+            store.empty()
+        final_results = getattr(inner, "final_results", None)
+        if final_results is not None and hasattr(final_results, "empty"):
+            final_results.empty()
+
+
 
 def build_simple_kg_pipeline(
     driver: Driver,
