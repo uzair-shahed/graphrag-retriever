@@ -47,6 +47,13 @@ from graphrag_pipeline.ingestion.record_adapter import (
 )
 from graphrag_pipeline.preflight import run_preflight_checks
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
+from graphrag_pipeline.storage.resumable_ingestion import (
+    cleanup_all_incomplete_paragraphs,
+    cleanup_incomplete_paragraph,
+    ensure_paragraph_hash_constraint,
+    load_completed_paragraph_hashes,
+    mark_paragraph_complete,
+)
 
 if TYPE_CHECKING:
     from graphrag_pipeline.query import QueryRequest
@@ -69,6 +76,7 @@ class LoadSummary:
     chunks_succeeded: list[dict[str, Any]] = field(default_factory=list)
     chunks_failed: list[dict[str, Any]] = field(default_factory=list)
     records_succeeded: int = 0
+    chunks_skipped: int = 0
     collect_seconds: float = 0.0
     run_seconds: float = 0.0
     elapsed_seconds: float = 0.0
@@ -84,6 +92,7 @@ class LoadSummary:
             "records_loaded": self.records_succeeded,
             "chunks_planned": self.chunks_planned,
             "chunks_succeeded": len(self.chunks_succeeded),
+            "chunks_skipped": self.chunks_skipped,
             "chunks_failed": len(self.chunks_failed),
             "dead_lettered_records": self.dead_lettered_records,
             "failed_chunks": self.chunks_failed,
@@ -296,6 +305,10 @@ async def run_requests(
     connection = Neo4jConnection(neo4j_settings)
     try:
         driver = connection.connect()
+        ensure_paragraph_hash_constraint(driver)
+        completed_hashes = load_completed_paragraph_hashes(driver)
+        cleanup_all_incomplete_paragraphs(driver)
+
         progress = tqdm(
             total=len(requests),
             desc="Loading MuSiQue chunks",
@@ -310,12 +323,31 @@ async def run_requests(
                     current_record_id = request.record_id
                     current_record_failed = False
 
+                p_hash = request.paragraph_hash
+                if p_hash and p_hash in completed_hashes:
+                    succeeded.append(
+                        {
+                            "chunk_id": request.chunk_id,
+                            "record_id": request.record_id,
+                            "skipped": True,
+                        }
+                    )
+                    progress.update(1)
+                    progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
+                    continue
+
+                if p_hash:
+                    cleanup_incomplete_paragraph(driver, p_hash)
+
                 text, document_metadata = build_plugin_input(request)
                 pipeline = None
                 try:
                     pipeline = build_simple_kg_pipeline(driver, openrouter_settings)
                     result = await pipeline.run_async(text=text, document_metadata=document_metadata)
                     ensure_writer_succeeded(result)
+                    if p_hash:
+                        mark_paragraph_complete(driver, p_hash)
+                        completed_hashes.add(p_hash)
                 except Exception as error:  # noqa: BLE001 - recorded, not swallowed
                     current_record_failed = True
                     failure = {
@@ -412,6 +444,7 @@ async def load_dataset(
     summary.run_seconds = measure_duration_seconds(run_started_at)
 
     summary.chunks_succeeded = succeeded
+    summary.chunks_skipped = len([item for item in succeeded if item.get("skipped")])
     summary.chunks_failed = failed
     summary.records_succeeded = count_fully_succeeded_records(requests, failed)
     summary.elapsed_seconds = measure_duration_seconds(started_at)
