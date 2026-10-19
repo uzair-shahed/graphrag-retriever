@@ -104,15 +104,24 @@ def evaluate_per_question_bm25(
         for hop_num, supp_idx in enumerate(hop_chain, start=1):
             hop_recalls[hop_num].append(1.0 if supp_idx in top_5_indices else 0.0)
 
+    later_hops = [score for h, scores in hop_recalls.items() if h >= 2 for score in scores]
+    later_hop_r5 = round(sum(later_hops) / len(later_hops) * 100, 2) if later_hops else 0.0
+
     results: dict[str, Any] = {
         "setting": "per_question",
         "question_count": len(records),
         "recall_at_2": round(sum(recalls_by_k[2]) / len(recalls_by_k[2]) * 100, 2) if recalls_by_k.get(2) else 0.0,
         "recall_at_5": round(sum(recalls_by_k[5]) / len(recalls_by_k[5]) * 100, 2) if recalls_by_k.get(5) else 0.0,
+        "later_hop_recall_at_5": later_hop_r5,
         "support_f1": round(sum(support_f1_scores) / len(support_f1_scores) * 100, 2) if support_f1_scores else 0.0,
         "per_hop_recall_at_5": {
             f"hop_{h}": round(sum(scores) / len(scores) * 100, 2)
             for h, scores in sorted(hop_recalls.items())
+        },
+        "per_question_scores": {
+            "recall_at_2": [r * 100 for r in recalls_by_k.get(2, [])],
+            "recall_at_5": [r * 100 for r in recalls_by_k.get(5, [])],
+            "support_f1": [f * 100 for f in support_f1_scores],
         },
     }
     return results
@@ -173,16 +182,25 @@ def evaluate_pooled_bm25(
                 key = idx_to_passage[idx]
                 hop_recalls[hop_num].append(1.0 if key in top_5_passages else 0.0)
 
+    later_hops = [score for h, scores in hop_recalls.items() if h >= 2 for score in scores]
+    later_hop_r5 = round(sum(later_hops) / len(later_hops) * 100, 2) if later_hops else 0.0
+
     results: dict[str, Any] = {
         "setting": "pooled",
         "question_count": len(records),
         "corpus_passages": len(passage_list),
         "recall_at_2": round(sum(recalls_by_k[2]) / len(recalls_by_k[2]) * 100, 2) if recalls_by_k.get(2) else 0.0,
         "recall_at_5": round(sum(recalls_by_k[5]) / len(recalls_by_k[5]) * 100, 2) if recalls_by_k.get(5) else 0.0,
+        "later_hop_recall_at_5": later_hop_r5,
         "support_f1": round(sum(support_f1_scores) / len(support_f1_scores), 2) if support_f1_scores else 0.0,
         "per_hop_recall_at_5": {
             f"hop_{h}": round(sum(scores) / len(scores) * 100, 2)
             for h, scores in sorted(hop_recalls.items())
+        },
+        "per_question_scores": {
+            "recall_at_2": [r * 100 for r in recalls_by_k.get(2, [])],
+            "recall_at_5": [r * 100 for r in recalls_by_k.get(5, [])],
+            "support_f1": support_f1_scores,
         },
     }
     return results
@@ -211,14 +229,21 @@ def evaluate_random_baseline(
         for hop_num, supp_idx in enumerate(hop_indices, start=1):
             hop_recalls[hop_num].append(1.0 if supp_idx in sampled else 0.0)
 
+    later_hops = [score for h, scores in hop_recalls.items() if h >= 2 for score in scores]
+    later_hop_r5 = round(sum(later_hops) / len(later_hops) * 100, 2) if later_hops else 0.0
+
     return {
         "setting": "random_per_question",
         "k": k,
         "question_count": len(records),
         "recall_at_k": round(sum(recalls) / len(recalls) * 100, 2) if recalls else 0.0,
+        "later_hop_recall_at_5": later_hop_r5,
         "per_hop_recall_at_k": {
             f"hop_{h}": round(sum(scores) / len(scores) * 100, 2)
             for h, scores in sorted(hop_recalls.items())
+        },
+        "per_question_scores": {
+            "recall_at_5": [r * 100 for r in recalls],
         },
     }
 
