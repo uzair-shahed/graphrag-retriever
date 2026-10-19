@@ -20,9 +20,10 @@ from neo4j.exceptions import ServiceUnavailable
 
 from graphrag_pipeline.config import (
     Neo4jSettings,
-    OpenRouterSettings,
+    model_settings_from_env,
 )
 from graphrag_pipeline.extraction.run_fixture import DEFAULT_FIXTURE, run_fixture
+from graphrag_pipeline.query import custom_query
 from graphrag_pipeline.retrieval import RetrievalError, RetrievalSettings, build_retriever, retrieve
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 from tools.model_gateway import run_gateway
@@ -106,16 +107,19 @@ def test_readme_flow_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         conn.run_write("CALL db.awaitIndexes(120)")
 
-    model_settings = OpenRouterSettings(
-        api_key="sk-stub-token",
-        base_url=GATEWAY_URL,
-        llm_model="openai/gpt-4o-mini",
-        embedding_model="openai/text-embedding-3-small",
-        embedding_dimensions=1536,
-    )
-    retrieval_settings = RetrievalSettings(retrieval_mode="vector")
+    model_settings = model_settings_from_env()
+    retrieval_settings = RetrievalSettings(mode="vector")
 
     with Neo4jConnection(settings) as conn:
-        retriever = build_retriever(conn.connect(), model_settings, retrieval_settings)
+        retriever = build_retriever(
+            conn.connect(),
+            settings.database,
+            model_settings,
+            retrieval_settings=retrieval_settings,
+        )
+        request = custom_query(
+            question="What company did Aster Systems acquire in 2021?",
+            trace_id="live-test-01",
+        )
         # On HEAD (9f8cc3d), this raises RetrievalError because chunk_id on Chunk is None
-        retrieve("What company did Aster Systems acquire in 2021?", retriever, retrieval_settings)
+        retrieve(request, retriever, retrieval_settings=retrieval_settings)
