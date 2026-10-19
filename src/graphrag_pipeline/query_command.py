@@ -131,10 +131,6 @@ async def execute_queries(
             retrieval = _empty_retrieval(request, retrieval_settings.mode)
             response = _failed_response(request, retrieval_settings.mode, error)
         retrievals[id(request)] = retrieval
-
-        raw_record = None
-        if request.origin == "musique" and request.record_id and configured_paths:
-            raw_record = _load_raw_record(configured_paths, request.record_id)
         return response
 
     responses = await run_query_batch(
@@ -143,19 +139,19 @@ async def execute_queries(
         preload_loader=preload_loader,
         show_progress=show_progress,
     )
-    if artifact_path is not None:
-        for index, (request, response) in enumerate(zip(requests, responses), start=1):
-            retrieval = retrievals.get(id(request), _empty_retrieval(request, retrieval_settings.mode))
-            raw_record = None
-            if request.origin == "musique" and request.record_id and configured_paths:
-                raw_record = _load_raw_record(configured_paths, request.record_id)
-            correctness = verify_query_correctness(
-                request,
-                retrieval,
-                response,
-                raw_record,
-                connection=connection,
-            )
+    for index, (request, response) in enumerate(zip(requests, responses), start=1):
+        retrieval = retrievals.get(id(request), _empty_retrieval(request, retrieval_settings.mode))
+        raw_record = None
+        if request.origin == "musique" and request.record_id and configured_paths:
+            raw_record = _load_raw_record(configured_paths, request.record_id)
+        correctness = verify_query_correctness(
+            request,
+            retrieval,
+            response,
+            raw_record,
+            connection=connection,
+        )
+        if artifact_path is not None:
             current_path = artifact_path
             if len(requests) > 1:
                 current_path = artifact_path.with_name(

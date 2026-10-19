@@ -19,7 +19,12 @@ def record(record_id: str, question: str) -> dict:
         "id": record_id,
         "question": question,
         "paragraphs": [
-            {"idx": 1, "title": "Evidence", "paragraph_text": "Aster Systems acquired Northwind Labs."}
+            {
+                "idx": 1,
+                "title": "Evidence",
+                "paragraph_text": "Aster Systems acquired Northwind Labs.",
+                "is_supporting": True,
+            }
         ],
         "supporting_facts": [["Evidence", 1]],
         "answer": "Aster Systems",
