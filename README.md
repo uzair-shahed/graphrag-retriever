@@ -210,34 +210,10 @@ for the JSON summary. A second Ctrl-C interrupts immediately, leaving the
 in-flight chunk for reconciliation on resume. `--manifest-path PATH` overrides
 the state file; `--fresh-manifest` moves existing state aside and starts a new
 manifest while still reconciling Neo4j. A changed source checksum or split
-cannot reuse the old manifest silently. Keep ingestion sequential; entity
-resolution remains disabled.
-
-Failed chunk requests are retained separately in `runs/ingestion-retries/`.
-Retryable failures receive at most three total attempts, with 5s/30s delays,
-on a later selected-range resume or an explicit drain. The loader does not wait
-or retry failures again in the same run. Terminal/exhausted failures remain as
-dead letters. Fresh progress manifests preserve queue history and budgets.
-
-The progress bar counts **processed** chunks, including failures and deferred
-work. Its postfix and JSON summary separately show verified/reused chunks and
-complete/partial/unstarted records. `records_loaded` means every expected
-paragraph is verified; successful chunk totals divided by twenty do not count
-complete records.
-
-Use a queue path from the loader's `queue_paths` output (replace `QUEUE.json`):
-
-```sh
-uv run --locked python -m graphrag_pipeline.ingestion.retry_chunks inspect --queue-path runs/ingestion-retries/QUEUE.json
-uv run --locked python -m graphrag_pipeline.ingestion.retry_chunks drain --queue-path runs/ingestion-retries/QUEUE.json --max-chunks 10
-```
-
-Inspection is offline. Draining uses stored validated requests and works without
-the original dataset. It verifies all stored sibling chunks before reporting a
-record complete. After fixing a terminal failure, use the explicit targeted
-`requeue` operation described in [retry queue operations](documentation.md#failed-chunk-queue-and-retry-operations).
+cannot reuse the old manifest silently. Keep ingestion sequential: concurrent
+writer support and a durable failed-chunk retry queue remain separate work.
 See [resume and recovery details](documentation.md#resume-stop-and-local-state)
-for state lifecycle, partial/conflicting data, limits, and exit codes.
+for state lifecycle, partial/conflicting data, limitations, and exit codes.
 
 To query a record from the downloaded file, pass `--dataset-path` and
 `--record-id` to `graphrag-query`; add `--preload` only when that selected

@@ -67,9 +67,7 @@ class World:
 
 
 @pytest.fixture
-def world(tmp_path, request, monkeypatch):
-    # These regressions check atomicity, not elapsed backoff scheduling.
-    monkeypatch.setenv("INGESTION_RETRY_DELAYS_SECONDS", "[0, 0]")
+def world(tmp_path, request):
     if os.environ.get("RUN_TASK13_ATOMIC_TESTS") != "1":
         pytest.skip("Opt in with RUN_TASK13_ATOMIC_TESTS=1; writes UUID-scoped fixtures.")
     settings = Neo4jSettings.from_env()
@@ -238,11 +236,6 @@ def test_transaction_failure_rolls_back_every_stage(world, monkeypatch, stage):
     assert classify_chunk(world.connection, request).state == ABSENT
     assert read_inventory(world.connection, request.chunk_id) == {"nodes": [], "relationships": []}
     monkeypatch.setattr(TransactionConnection, "run_write", original)
-    # Unknown injected failures are terminal until the operator reviews them.
-    from graphrag_pipeline.ingestion.retry_queue import RetryStore
-    queue = RetryStore().for_request(request)
-    assert queue.snapshot().chunks[request.chunk_id].status == "dead_letter"
-    queue.requeue(request.chunk_id, "reviewed injected rollback; writer repaired")
     assert asyncio.run(ingest_paragraph(world.connection, pipeline, request)).state.state == COMPLETE
     world.evidence.update(rollback_stage=stage, rollback_verified=True)
 
@@ -305,13 +298,8 @@ def test_changed_input_and_tampered_graph_are_not_replayed(world, change):
         changed = request.model_copy(update={"provenance": request.provenance.model_copy(update={change: "changed"})})
     else:
         changed = request.model_copy(update={change: "changed"})
-    if change == "source_sha256":
-        result = asyncio.run(ingest_paragraph(world.connection, pipeline, changed))
-        assert result.state.state == CONFLICT
-    else:
-        with pytest.raises(Exception, match="conflicting request identity"):
-            asyncio.run(ingest_paragraph(world.connection, pipeline, changed))
-    assert llm.calls == 1
+    result = asyncio.run(ingest_paragraph(world.connection, pipeline, changed))
+    assert result.state.state == CONFLICT and llm.calls == 1
     text, metadata = build_plugin_input(changed)
     with pytest.raises(Exception, match="conflict"):
         asyncio.run(pipeline.run_async(text=text, document_metadata=metadata))

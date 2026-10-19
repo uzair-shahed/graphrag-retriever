@@ -16,8 +16,6 @@ from graphrag_pipeline.diagnostics import (
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.atomic_writer import IngestionStateError
 from graphrag_pipeline.extraction.ingest import ingest_paragraph
-from graphrag_pipeline.ingestion.retry_policy import attempt_configuration, classify_failure
-from graphrag_pipeline.ingestion.retry_queue import RetryStore
 from graphrag_pipeline.ingestion.reconcile import COMPLETE
 from graphrag_pipeline.extraction.schemas import ExtractionRequest
 from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
@@ -38,37 +36,25 @@ async def run_fixture(path: Path) -> dict[str, Any]:
     database for inspection.
     """
     request = load_fixture(path)
-    queue = RetryStore().for_request(request)
-    queue.ensure_request(request)
-    try:
-        neo4j_settings = Neo4jSettings.from_env()
-        model_settings = model_settings_from_env()
-    except Exception as error:
-        queue.record_observation(request.chunk_id, classify_failure(error, "configuration"), "configuration")
-        raise
+    neo4j_settings = Neo4jSettings.from_env()
+    model_settings = model_settings_from_env()
     connection = Neo4jConnection(neo4j_settings)
     try:
-        pipeline = None
-
-        def get_pipeline():
-            nonlocal pipeline
-            pipeline = build_simple_kg_pipeline(connection.connect(), model_settings, neo4j_settings=neo4j_settings)
-            return pipeline
-
+        pipeline = build_simple_kg_pipeline(
+            connection.connect(), model_settings, neo4j_settings=neo4j_settings
+        )
         try:
-            ingested = await ingest_paragraph(connection, None, request, retry_queue=queue,
-                configuration=attempt_configuration(neo4j_settings, model_settings), pipeline_factory=get_pipeline)
+            ingested = await ingest_paragraph(connection, pipeline, request)
             if ingested.state.state != COMPLETE:
                 raise IngestionStateError(f"{ingested.state.state}: {ingested.state.reason}")
         except Exception as error:  # noqa: BLE001 - preserve GraphRAG failures
-            if pipeline is not None:
-                try:
-                    llm = pipeline.runner.config.llm_config["default"].root
-                    response_path = save_invalid_llm_response(error, getattr(llm, "last_response", None))
-                    if response_path is not None:
-                        print(json.dumps({"invalid_llm_response": response_path.as_posix()}))
-                except Exception as diagnostic_error:
-                    print(json.dumps({"diagnostic_error": exception_diagnostics(diagnostic_error)}))
+            llm = pipeline.runner.config.llm_config["default"].root
+            response_path = save_invalid_llm_response(
+                error,
+                getattr(llm, "last_response", None),
+            )
+            if response_path is not None:
+                print(json.dumps({"invalid_llm_response": response_path.as_posix()}))
             raise
         return {
             "status": "succeeded",

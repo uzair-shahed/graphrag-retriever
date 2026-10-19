@@ -98,7 +98,7 @@ def test_atomic_write_failure_leaves_previous_manifest_intact(tmp_path: Path) ->
     before = path.read_text()
 
     with patch("graphrag_pipeline.ingestion.progress_manifest.os.replace", side_effect=OSError("disk")):
-        with pytest.raises(ManifestError):
+        with pytest.raises(OSError):
             manifest.mark_verified("musique:r1:paragraph:0")
 
     assert path.read_text() == before

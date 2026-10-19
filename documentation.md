@@ -320,9 +320,8 @@ Chunk provenance and a versioned completion record together. The graph is read
 back and checked against that record; only an intact result becomes `verified`.
 A record becomes loaded only when every expected paragraph is verified.
 On every resume, Neo4j takes precedence over the manifest: matching complete
-chunks skip extraction and embedding calls. Absent chunks are ingested only
-when their durable retry state permits an attempt; legacy, partial or conflicting
-chunks are reported and skipped. A write that completed
+chunks skip extraction and embedding calls, absent chunks are ingested, and
+legacy, partial or conflicting chunks are reported and skipped. A write that completed
 before its checkpoint can therefore be detected without another provider call.
 
 Press Ctrl-C once (or send SIGTERM) to request a clean stop. The current
@@ -331,43 +330,20 @@ chunk boundary. An early stop prints a JSON summary and exits `130`. If the
 signal arrives during the final chunk, the batch may finish normally. Sending
 the same signal again uses immediate default signal termination; there may be
 no summary and the exit status depends on the signal/platform. An interrupted
-manifest `in_flight` entry is treated as pending on reload and reported in
-`interrupted_in_flight_chunks`. The separate queue retains its in-flight attempt
-until Neo4j reconciliation: committed work is reused; absent interrupted work
-consumes its recorded attempt and observes the remaining budget/backoff before
-another pipeline call.
+`in_flight` entry is treated as pending on reload, reported in
+`interrupted_in_flight_chunks`, and reconciled before any new extraction.
 
 The summary includes `records_loaded`, newly succeeded chunks,
 `chunks_skipped_already_verified`, failures, investigation reports, interrupted
 chunk IDs, `stopped_early`, `chunks_not_attempted`, and `manifest_paths`.
 Recovered interrupted entries can still yield success once all work verifies.
-The bar counts **processed** chunks, including failures, investigation and
-retry-deferred entries. `chunks_newly_verified`, `chunks_reused`,
-`chunks_failed_this_run`, `chunks_investigation` and `chunks_deferred` separate
-those outcomes. `records_complete` (also `records_loaded`), `records_partial`
-and `records_unstarted` use exact expected paragraph IDs per source and record.
-Reused chunks update the postfix immediately, including the last chunk of a run.
-
-For example, at 145 processed chunks with five failures there can be 140 newly
-verified chunks but only four complete records: 80 chunks in four complete
-records, 55 successes plus five failures across three incomplete records, and
-five successes in the next record. The remaining two records are unstarted.
-Dividing 140 or 145 by twenty does not count complete records. Paragraph counts
-can also differ between records.
-
-`queue_paths` and `retry_chunks` expose each selected chunk's retry status,
-lifetime/cycle attempt counts, budget, backoff delays, last category, terminal
-reason and next eligible timestamp (UTC epoch seconds). `chunks_retry_attempted`,
-`chunks_unresolved` and `chunks_dead_lettered` summarize retry work. A run with
-selected deferred or terminal work exits nonzero even if no new provider call
-fails. Normal resume never drains failures outside the selected record range.
 Handled batch-loader exit codes are:
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Successful batch, or successful dry-run validation. |
-| `1` | Invalid/dead-lettered records, failed/deferred chunks, or unresolved graph/queue state. Unexpected runtime errors also generally exit nonzero. |
-| `2` | Queue/manifest error (including corruption or source mismatch), or argument-parser error. |
+| `1` | Invalid/dead-lettered records, failed chunks, or unresolved partial/conflicting graph state. Unexpected runtime errors also generally exit nonzero. |
+| `2` | Manifest error (including a checksum/split mismatch), or argument-parser error. |
 | `130` | Requested clean stop before all chunks were processed. |
 
 Progress is local operational state under gitignored `runs/`, retained after
@@ -382,9 +358,8 @@ Partial/conflicting state remains `needs_investigation`, with node element IDs,
 counts, and a reason in the summary. It is never automatically deleted,
 overwritten, or repaired. Investigate the reported nodes before manually
 cleaning them up; a later run ingests a chunk only after it classifies absent.
-Failed chunks are retained in the independent durable queue described below.
-Queued failures never authorize automatic repair or overwriting of unsafe graph
-state, even after an operator requeues them.
+Failed chunks are checked again on the next run; there is currently no durable
+retry queue or automatic bounded retry/backoff policy at the chunk level.
 
 Use one ingestion writer at a time. Source-scoped unique node keys, per-type
 unique relationship keys and a unique `IngestionCompletion.chunk_id` enforce
@@ -396,126 +371,6 @@ Query `--preload` uses the same automatic manifest/reconciliation path, with one
 default file per checksum and split when multiple sources are selected. It
 does not expose the batch loader's manifest override/fresh-state flags or its
 clean-stop signal handler. Query-only runs do not invoke ingestion.
-
-#### Failed-chunk queue and retry operations
-
-Batch, query preload, fixture and direct shared ingestion calls persist their
-validated application requests before provider execution. Queue JSON lives under
-`runs/ingestion-retries/<full-source-SHA256>-<split-name-SHA256>.json`; the complete
-source fingerprint and split are checked inside the file. Historical synthetic
-fixtures with opaque checksum tokens use an `opaque-` source-name hash, retaining
-their original provenance unchanged. No gold answer/support labels enter requests.
-
-Each source queue retains exact requests and expected sibling inventories,
-canonical fingerprints, lifetime attempt history, cycle policies, non-secret
-model/database configuration, error categories, next-attempt timestamps and
-linked progress-manifest paths. States are `pending`, `in_flight`, `retry_wait`,
-`dead_letter` and `resolved`. Queue updates fsync a temporary file, atomically
-replace the target, then fsync its directory. Persistence errors stop the command;
-optional invalid-response logging cannot hide an already-recorded failure.
-The queue resolves only after the same atomic Neo4j inventory verification used
-by normal ingestion, before the progress manifest is marked verified.
-
-Defaults are **three total pipeline attempts**, with **5 seconds before attempt
-two and 30 seconds before attempt three**. Configure new cycles in `.env`:
-
-```dotenv
-INGESTION_RETRY_MAX_ATTEMPTS=3
-INGESTION_RETRY_DELAYS_SECONDS=[5,30]
-INGESTION_RETRY_STATE_DIR=runs/ingestion-retries
-```
-
-Delays must be finite and nonnegative, with exactly one value per possible retry.
-The stored cycle policy survives restarts and fresh manifests. Provider SDK and
-Neo4j transaction retries remain separate; a chunk attempt counts one pipeline
-invocation, so it is not an exact count of underlying HTTP/transaction attempts.
-Reconciliation-only checks do not spend a new pipeline attempt. Retries use the
-currently configured models and retain their configuration names per attempt.
-
-Transient connectivity, timeouts, rate limits, temporary server/database errors
-and malformed generated output are retryable. Authentication, invalid input or
-configuration, unsafe graph states, unknown errors and exhausted budgets remain
-in durable dead-letter state. Existing untyped manifest failures are imported
-with their recorded attempt counts as `legacy_unclassified` dead letters; they
-need explicit review/requeue rather than a guess about retryability. Pre-queue
-interrupted manifests also retain their recorded attempt counts: verified
-commits resolve without models, while absent work preserves the remaining budget
-and backoff (or requires requeue if already exhausted).
-
-There is **no same-run retry loop and no backoff sleep**. Repeat the selected
-loader command later, or use the explicit command below. Due checks use durable
-UTC epoch timestamps. Reopening state, changing model settings, or using
-`--fresh-manifest` does not reset the attempt budget. A hard interruption may
-have spent its in-flight attempt even when no graph was committed; Neo4j is
-checked before deciding whether to reuse work or schedule another attempt.
-
-Replace `QUEUE.json` with a path from `queue_paths`; copy actual IDs from inspect:
-
-```sh
-# Offline state/history inspection, without Neo4j or model credentials.
-uv run --locked python -m graphrag_pipeline.ingestion.retry_chunks inspect --queue-path runs/ingestion-retries/QUEUE.json
-
-# Process at most ten eligible candidates from this source, without sleeping.
-uv run --locked python -m graphrag_pipeline.ingestion.retry_chunks drain --queue-path runs/ingestion-retries/QUEUE.json --max-chunks 10
-
-# Narrow inspection/draining to a record; repeat --record-id or --chunk-id.
-uv run --locked python -m graphrag_pipeline.ingestion.retry_chunks inspect --queue-path runs/ingestion-retries/QUEUE.json --record-id 2hop__460946_294723
-
-# After correcting a terminal cause, start a new bounded cycle for this exact ID.
-uv run --locked python -m graphrag_pipeline.ingestion.retry_chunks requeue --queue-path runs/ingestion-retries/QUEUE.json --chunk-id musique:2hop__460946_294723:paragraph:3 --reason "Corrected extraction token limit"
-```
-
-`inspect` reports local state and explicitly says Neo4j was not checked. `requeue`
-requires explicit chunk IDs, a nonblank reason and terminal entries; all targets
-are validated and changed in one atomic update. It preserves history and never
-calls providers. Requeueing unsafe graph data cannot bypass reconciliation.
-Record/chunk filters intersect when combined; unknown IDs or an empty explicit
-intersection fail with exit `2`.
-
-`drain` snapshots eligible `pending`/due `retry_wait` candidates and interrupted
-entries once, orders them by chunk ID and considers each at most once. Work that
-becomes due later is left for another invocation. `--max-chunks N` limits
-candidate execution; it does not limit required read-only sibling verification.
-No ingestion is performed for unselected siblings. The command rechecks every
-stored sibling before claiming an affected record complete, and keeps partial
-records explicit. A filtered drain may exit `0` for fully resolved selected
-chunks while reporting an incomplete parent due to unselected missing siblings.
-
-Stored validated requests make draining independent of the original dataset.
-Existing linked progress manifests are synchronized; older queues can use
-`drain --manifest-path PATH` to attach an existing custom manifest. Source and
-expected-inventory mismatches stop processing. Missing linked manifests are
-reported and are not recreated; their absence does not prevent independent
-queue/Neo4j verification. Removing progress files leaves the queue intact.
-Keep queue backups: deleting a queue discards retry limits and history.
-
-Drain exit codes are `0` for resolved selected work, `1` for unresolved selected
-work, `2` for invalid arguments/state, and `130` for a requested stop before all
-candidate execution finishes. Inspect/requeue return `0` on successful operation,
-even when inspected entries remain unresolved. One Ctrl-C/SIGTERM finishes and
-persists the current attempt; a repeated signal terminates immediately. Provider
-work that committed before any local checkpoint failure is verified and reused
-on the next run. No automatic deletion, repair or legacy adoption occurs.
-
-Keep one ingestion/drain writer active at a time, with entity resolution disabled.
-The queue stores full request text/history and grows with its source; source-wide
-JSON rewriting is intended for this local sequential workflow. Required live
-acceptance uses macOS, Neo4j Enterprise 2026.08.1, GraphRAG 1.21.0 and deterministic
-providers. Other OS/database deployments and real provider behavior need their
-own validation; paid-provider/full-dataset benchmarking is outside this task.
-
-Final deterministic and live acceptance commands:
-
-```sh
-.venv/bin/python -m pytest tests/unit -q
-RUN_TASK12_RETRY_TESTS=1 RUN_TASK13_ATOMIC_TESTS=1 RUN_TASK13_STOCK_WRITER_TESTS=1 TASK12_EVIDENCE_DIR=runs/task12-final/retry TASK13_EVIDENCE_DIR=runs/task12-final/atomic .venv/bin/python -m pytest tests/integration/test_retry_capture_integration.py tests/integration/test_atomic_ingestion.py tests/integration/test_stock_writer_behavior.py -q
-```
-
-Live tests use real Neo4j and pipeline/provider doubles, including actual process
-termination, CLI signal handling, exhausted-cycle requeue, missing sources,
-provider-call ledgers and before/after graph-cleanup hashes. They are opt-in by
-default; once enabled, unavailable required Neo4j fails acceptance. Optional
-real Ollama/provider/retrieval suites are not required for this ingestion task.
 
 #### Atomic ingestion identity and legacy data
 
@@ -566,8 +421,8 @@ The same validated boundary is used by batch loading, query preload and
 commit rolls back the whole graph. A stop after commit but before checkpoint
 is recovered by verifying Neo4j and skipping provider work. Transaction retries
 reuse prepared model output; a lost commit acknowledgment reconciles the
-database before retrying writes. These transaction-level retries reuse prepared
-model output and are separate from the durable application-chunk budget.
+database before retrying writes. These are transaction-level retries, not
+Task 12's future durable failed-chunk queue.
 
 #### Repeatable idempotency acceptance tests
 

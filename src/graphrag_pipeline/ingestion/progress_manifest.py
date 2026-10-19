@@ -79,7 +79,6 @@ class ProgressManifest:
             "chunks": {},
         }
         self.interrupted_in_flight: list[str] = []
-        self._superseded_failures: dict[str, Any] = {}
 
     @classmethod
     def open(
@@ -98,20 +97,10 @@ class ProgressManifest:
             ManifestSourceMismatch: The file records a different checksum or split.
             ManifestError: The file is not a valid manifest.
         """
-        superseded_failures = {}
         if path.exists() and fresh:
-            try:
-                previous = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as error:
-                raise ManifestError(f"cannot inspect manifest before preserving retry history: {error}") from error
-            if isinstance(previous, dict) and previous.get("source_sha256") == source_sha256 and previous.get("source_split") == source_split:
-                superseded_failures = {cid: chunk for cid, chunk in previous.get("chunks", {}).items()
-                                       if chunk.get("status") in {FAILED, IN_FLIGHT} or chunk.get("interrupted")}
-            path.replace(path.with_name(f"{path.name}.superseded-{time.time_ns()}"))
+            path.replace(path.with_name(f"{path.name}.superseded-{int(time.time())}"))
         if not path.exists():
-            manifest = cls(path, source_sha256, source_split)
-            manifest._superseded_failures = superseded_failures
-            return manifest
+            return cls(path, source_sha256, source_split)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -158,16 +147,6 @@ class ProgressManifest:
                 )
         self.flush()
 
-    def legacy_failure_snapshot(self, chunk_id: str) -> dict[str, Any]:
-        """Include retained failure counts when --fresh-manifest archived old state."""
-        from copy import deepcopy
-        return deepcopy(self._superseded_failures.get(chunk_id, self._data["chunks"][chunk_id]))
-
-    def chunk_snapshot(self, chunk_id: str) -> dict[str, Any]:
-        """Read legacy operational state without granting mutation access."""
-        from copy import deepcopy
-        return deepcopy(self._data["chunks"][chunk_id])
-
     def status(self, chunk_id: str) -> str:
         return self._data["chunks"][chunk_id]["status"]
 
@@ -178,11 +157,6 @@ class ProgressManifest:
         for key, value in extra.items():
             chunk[key] = value
         self.flush()
-
-    def require_verification(self, chunk_id: str) -> None:
-        """A new run must not count an old local success before reconciliation."""
-        if self.status(chunk_id) == VERIFIED:
-            self._set(chunk_id, PENDING)
 
     def mark_in_flight(self, chunk_id: str) -> None:
         chunk = self._data["chunks"][chunk_id]
@@ -212,10 +186,7 @@ class ProgressManifest:
 
     def flush(self) -> None:
         """Persist the manifest atomically (temp file, fsync, rename)."""
-        try:
-            _atomic_write_json(self.path, self._data)
-        except OSError as error:
-            raise ManifestError(f"cannot persist manifest {self.path}: {error}") from error
+        _atomic_write_json(self.path, self._data)
 
 
 class ManifestStore:
@@ -231,7 +202,6 @@ class ManifestStore:
         self._state_dir = state_dir
         self._fresh = fresh
         self._manifests: dict[tuple[str, str], ProgressManifest] = {}
-        self._existing: dict[tuple[str, str], ProgressManifest | None] = {}
 
     def for_request(self, request: ExtractionRequest) -> ProgressManifest:
         key = (request.provenance.source_sha256, request.provenance.source_split)
@@ -243,25 +213,6 @@ class ManifestStore:
             path = self._manifest_path or default_manifest_path(key[0], key[1], self._state_dir)
             self._manifests[key] = ProgressManifest.open(path, key[0], key[1], fresh=self._fresh)
         return self._manifests[key]
-
-    def existing_failure_snapshot(self, request: ExtractionRequest) -> dict[str, Any] | None:
-        """Read old failures before fresh-state archiving can change the file."""
-        key = (request.provenance.source_sha256, request.provenance.source_split)
-        if key in self._manifests:
-            manifest = self._manifests[key]
-        else:
-            if key not in self._existing:
-                path = self._manifest_path or default_manifest_path(*key, self._state_dir)
-                try:
-                    self._existing[key] = ProgressManifest.open(path, *key) if path.exists() else None
-                except ManifestSourceMismatch:
-                    if not self._fresh:
-                        raise
-                    self._existing[key] = None
-            manifest = self._existing[key]
-        if manifest is None or request.chunk_id not in manifest._data["chunks"]:
-            return None
-        return manifest.legacy_failure_snapshot(request.chunk_id)
 
     def register(self, requests: list[ExtractionRequest]) -> None:
         grouped: dict[tuple[str, str], list[ExtractionRequest]] = {}

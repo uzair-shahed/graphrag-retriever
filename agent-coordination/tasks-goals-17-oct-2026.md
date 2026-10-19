@@ -34,9 +34,8 @@ reported 118 passing tests. The live Neo4j preload and query path has also
 been exercised, but no dedicated repeatable end-to-end retrieval harness
 currently captures that run. Existing worktree changes are user or
 automation-owned and must be preserved while completing these tasks. The
-batch loader at audit time reported chunk failures without resumable progress
-or a durable retry queue; Tasks 11–13 completion logs below supersede that
-historical baseline. These tasks cover reliability around the
+batch loader currently reports chunk failures but does not persist resumable
+progress or a durable retry queue. The new tasks cover reliability around the
 `SimpleKGPipeline` ingestion and Neo4j write path; they do not claim that the
 separate autonomous entity-resolution agent is implemented.
 
@@ -537,38 +536,6 @@ See [the implementation sequence and writer evidence](task-13-remainder-plan.md)
   reports. `git diff --check` passed. No legacy migration or reset was performed.
 - Sequential ingestion remains the supported contract. Task 12 has not started;
   user acceptance of Task 13 has not been presumed.
-
-### Task 12 — Durable failed-chunk queue (2026-10-18)
-
-**Status:** IMPLEMENTATION AND REQUIRED VALIDATION COMPLETE; ready for user
-acceptance. The agent stopped after 12.1 and 12.2; the user then explicitly
-authorized all remaining subtasks together, superseding the remaining stops.
-See [the complete Task 12 report](task-12-remainder-plan.md).
-
-- Durable source queues retain validated requests/siblings, fingerprints,
-  attempts, policies, categories, timestamps, model/configuration names and dead
-  letters. Default budgets include three total attempts with five/thirty-second
-  delays. Requeue requires named terminal IDs and preserves lifetime history.
-- Batch, preload and fixture ingestion use mandatory reconciliation and durable
-  tracking. Queue/checkpoint failures stop processing. Committed graph effects
-  are verified/reused; unsafe graph state stays preserved and unresolved.
-- Selected-range resume does not drain unrelated failures or retry within the
-  same invocation. Exact paragraph IDs drive processed/new/used/failed/deferred
-  chunk counts and complete/partial/unstarted records; no chunk-total division
-  or record-boundary bookkeeping is used to claim completion.
-- Added offline inspect/requeue and bounded source-independent drain commands.
-  Existing linked progress manifests synchronize after identity checks; every
-  stored sibling receives independent verification before a completion claim.
-- Legacy failure/in-flight attempt counts survive upgrades and fresh manifests.
-  CLI process-death and SIGINT/SIGTERM tests verify rollback, commit/checkpoint
-  recovery, clean stops, exhaustion and reviewed recovery without duplicate work.
-- **429 unit tests and 41 live Neo4j tests passed**, zero skipped required live
-  checks, with deterministic providers. Every cleanup hash matched existing
-  graph state. No paid provider calls or existing graph resets occurred.
-- Evidence: `runs/task12-final/validation-summary.json` and per-test reports.
-  README, operational documentation, environment examples and active ingestion
-  contracts are updated. Sequential ingestion/entity-resolution limits remain.
-  Other hardening tasks in this document retain their independent status.
 
 ## Goal
 
