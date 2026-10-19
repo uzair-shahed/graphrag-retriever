@@ -1,0 +1,7 @@
+MuSiQue Official Evaluation Scorer
+Upstream Repository: https://github.com/StonyBrookNLP/musique
+Upstream Commit: 922ac98f19a201998dbdae6d7f2887a5258dbdeb
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+Citation: Trivedi et al., MuSiQue: Multihop Questions via Single-hop Question Composition, TACL 2022
+
+Vendored unmodified for reproducible evaluation.
