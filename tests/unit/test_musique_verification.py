@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from graphrag_pipeline.musique_verification import (
+    _supporting_indices,
     compare_musique_evidence,
     verify_graph_evidence_membership,
     verify_query_correctness,
@@ -184,3 +185,87 @@ def test_write_run_artifact_contains_query_evidence_answer_and_configuration(tmp
     assert artifact["response"]["citations"] == ["musique:record-1:paragraph:1"]
     assert artifact["correctness"]["graph_membership"]["status"] == "not_checked"
     assert artifact["configuration"]["top_k"] == 5
+
+
+def test_supporting_indices_extracted_from_real_musique_fixtures() -> None:
+    """Real MuSiQue records extract supporting indices directly from is_supporting flags."""
+    # 2-hop record from MuSiQue Ans dev split: 2hop__460946_294723
+    record_2hop = {
+        "id": "2hop__460946_294723",
+        "paragraphs": [
+            {"idx": 0, "title": "Grant's First Stand", "is_supporting": False},
+            {"idx": 5, "title": "Green performer bio", "is_supporting": True},
+            {"idx": 7, "title": "Random doc", "is_supporting": False},
+            {"idx": 10, "title": "Miquette Giraudy", "is_supporting": True},
+        ],
+    }
+    assert _supporting_indices(record_2hop) == {5, 10}
+
+    # 3-hop record from MuSiQue Ans dev split: 3hop1__454441_55349_651302
+    record_3hop = {
+        "id": "3hop1__454441_55349_651302",
+        "paragraphs": [
+            {"idx": 0, "title": "The Hobbit (South Park)", "is_supporting": True},
+            {"idx": 1, "title": "Dog with a Blog", "is_supporting": False},
+            {"idx": 7, "title": "Stan voice actor", "is_supporting": True},
+            {"idx": 9, "title": "Trey Parker birthplace", "is_supporting": True},
+        ],
+    }
+    assert _supporting_indices(record_3hop) == {0, 7, 9}
+
+    # 4-hop record from MuSiQue Ans dev split: 4hop1__93963_170667_443779_52195
+    record_4hop = {
+        "id": "4hop1__93963_170667_443779_52195",
+        "paragraphs": [
+            {"idx": 1, "title": "WFGS", "is_supporting": False},
+            {"idx": 3, "title": "Cathay Pacific Flight 780", "is_supporting": True},
+            {"idx": 11, "title": "Lion Air hub airport", "is_supporting": True},
+            {"idx": 13, "title": "Timor Leste Commission", "is_supporting": True},
+            {"idx": 14, "title": "Francisco Guterres presidency", "is_supporting": True},
+        ],
+    }
+    assert _supporting_indices(record_4hop) == {3, 11, 13, 14}
+
+
+def test_inference_modules_do_not_import_evaluation_gold_labels() -> None:
+    """Inference modules must not leak or import gold evaluation verification logic."""
+    import ast
+
+    inference_files = [
+        Path("src/graphrag_pipeline/retrieval.py"),
+        Path("src/graphrag_pipeline/answer.py"),
+        Path("src/graphrag_pipeline/extraction/pipeline.py"),
+        Path("src/graphrag_pipeline/query.py"),
+        Path("src/graphrag_pipeline/ingestion/record_adapter.py"),
+    ]
+    forbidden_names = {"_supporting_indices", "compare_musique_evidence", "verify_query_correctness"}
+    for file_path in inference_files:
+        tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    assert alias.name not in forbidden_names, (
+                        f"Inference module {file_path} forbidden from importing {alias.name}"
+                    )
+
+
+def test_musique_ans_dev_dataset_hop_count_matches_supporting_count() -> None:
+    """All 2,417 Ans dev records must have supporting count equal to hop count."""
+    ans_dev_path = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
+    if not ans_dev_path.exists():
+        pytest.skip("MuSiQue Ans dev dataset not downloaded locally.")
+
+    total = 0
+    with ans_dev_path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            total += 1
+            hop = int(record["id"].split("hop")[0])
+            supporting = _supporting_indices(record)
+            assert len(supporting) == hop, f"Record {record['id']} expected {hop} supporting, got {len(supporting)}"
+
+    assert total == 2417
+

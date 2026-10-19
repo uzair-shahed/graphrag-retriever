@@ -95,3 +95,82 @@ def test_verify_graph_provenance_rejects_missing_source_metadata() -> None:
             chunk_id="musique:fixture_valid_multi_hop_001:paragraph:1",
             record_id="fixture_valid_multi_hop_001",
         )
+
+
+def test_verify_graph_provenance_accepts_real_graph_without_acquired() -> None:
+    """Real graphs with only FROM_CHUNK and FROM_DOCUMENT pass with default expected types."""
+    connection = DummyConnection(
+        document_rows=[
+            {
+                "document_id": "musique:document:sample-doc",
+                "chunk_id": "musique:rec-1:paragraph:0",
+                "record_id": "rec-1",
+                "paragraph_idx": "0",
+                "source_dataset": "musique",
+                "source_split": "dev",
+                "source_file": "musique_ans_v1.0_dev.jsonl",
+                "source_sha256": "sample-sha",
+                "source_line": "1",
+                "title": "Sample Doc",
+            }
+        ],
+        chunk_rows=[
+            {
+                "chunk_id": "musique:rec-1:paragraph:0",
+                "text": "Sample text",
+                "embedding": [0.1, 0.2],
+            }
+        ],
+        relationship_rows=[
+            {"relationship_type": "FROM_CHUNK", "count": 1},
+            {"relationship_type": "FROM_DOCUMENT", "count": 1},
+        ],
+    )
+
+    result = verify_graph_provenance(
+        connection,
+        chunk_id="musique:rec-1:paragraph:0",
+        record_id="rec-1",
+    )
+    assert result["verified"] is True
+    assert "ACQUIRED" not in result["relationship_counts"]
+
+
+def test_verify_graph_provenance_rejects_missing_custom_relationship() -> None:
+    """When a specific relationship type is requested, its absence raises ValueError."""
+    connection = DummyConnection(
+        document_rows=[
+            {
+                "document_id": "musique:document:sample-doc",
+                "chunk_id": "musique:rec-1:paragraph:0",
+                "record_id": "rec-1",
+                "paragraph_idx": "0",
+                "source_dataset": "musique",
+                "source_split": "dev",
+                "source_file": "musique_ans_v1.0_dev.jsonl",
+                "source_sha256": "sample-sha",
+                "source_line": "1",
+                "title": "Sample Doc",
+            }
+        ],
+        chunk_rows=[
+            {
+                "chunk_id": "musique:rec-1:paragraph:0",
+                "text": "Sample text",
+                "embedding": [0.1, 0.2],
+            }
+        ],
+        relationship_rows=[
+            {"relationship_type": "FROM_CHUNK", "count": 1},
+            {"relationship_type": "FROM_DOCUMENT", "count": 1},
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Missing expected relationship types in graph: \\['ACQUIRED'\\]"):
+        verify_graph_provenance(
+            connection,
+            chunk_id="musique:rec-1:paragraph:0",
+            record_id="rec-1",
+            expected_relationship_types={"FROM_CHUNK", "FROM_DOCUMENT", "ACQUIRED"},
+        )
+

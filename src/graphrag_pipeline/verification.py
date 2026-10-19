@@ -11,13 +11,17 @@ def _require_fields(record: dict[str, Any], required: list[str], label: str) -> 
         raise ValueError(f"Missing {label} provenance fields: {', '.join(missing)}")
 
 
-def verify_graph_provenance(connection: Any, chunk_id: str, record_id: str) -> dict[str, Any]:
+def verify_graph_provenance(
+    connection: Any,
+    chunk_id: str,
+    record_id: str,
+    expected_relationship_types: set[str] | list[str] | None = None,
+) -> dict[str, Any]:
     """Run read-only Neo4j queries and validate the extracted graph against the MuSiQue fixture.
 
     The function is intentionally small and conservative: it verifies that the
     expected source-backed document and chunk records exist and that the graph
-    includes the plugin-generated relationship types observed in the active
-    smoke test.
+    includes the required relationship types.
     """
     document_rows = connection.run_read(
         """
@@ -79,15 +83,18 @@ def verify_graph_provenance(connection: Any, chunk_id: str, record_id: str) -> d
         """
     )
     relationship_counts = {row["relationship_type"]: row["count"] for row in relationship_rows}
-    required_types = {"FROM_CHUNK", "FROM_DOCUMENT", "ACQUIRED"}
+    required_types = (
+        set(expected_relationship_types)
+        if expected_relationship_types is not None
+        else {"FROM_CHUNK", "FROM_DOCUMENT"}
+    )
     missing = sorted(required_types - set(relationship_counts))
     if missing:
         raise ValueError(f"Missing expected relationship types in graph: {missing}")
 
-    if relationship_counts.get("FROM_CHUNK", 0) < 1:
-        raise ValueError("Graph does not contain the expected FROM_CHUNK relationship")
-    if relationship_counts.get("FROM_DOCUMENT", 0) < 1:
-        raise ValueError("Graph does not contain the expected FROM_DOCUMENT relationship")
+    for req in required_types:
+        if relationship_counts.get(req, 0) < 1:
+            raise ValueError(f"Graph does not contain the expected {req} relationship")
 
     return {
         "verified": True,

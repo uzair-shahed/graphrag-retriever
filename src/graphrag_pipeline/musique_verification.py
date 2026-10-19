@@ -73,7 +73,23 @@ class CorrectnessReport(BaseModel):
 
 
 def _supporting_indices(raw_record: dict[str, Any]) -> set[int]:
-    """Extract supporting paragraph indices without altering the raw record."""
+    """Extract supporting paragraph indices without altering the raw record.
+
+    In MuSiQue, supporting paragraphs are marked with is_supporting=True directly
+    on each item in the paragraphs list (unlike HotpotQA's supporting_facts list).
+    """
+    paragraphs = raw_record.get("paragraphs", [])
+    supporting: set[int] = set()
+    for item in paragraphs:
+        if isinstance(item, dict) and item.get("is_supporting") and "idx" in item:
+            try:
+                supporting.add(int(item["idx"]))
+            except (TypeError, ValueError):
+                continue
+    if supporting:
+        return supporting
+
+    # Backward compatibility fallback for synthetic/legacy fixtures using supporting_facts
     values: set[int] = set()
     for item in raw_record.get("supporting_facts", []):
         if isinstance(item, (list, tuple)) and len(item) >= 2:
