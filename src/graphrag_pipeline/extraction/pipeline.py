@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from neo4j import Driver
+from neo4j_graphrag.components.schema import GraphSchema
 from neo4j_graphrag.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
@@ -29,6 +30,7 @@ from graphrag_pipeline.config import (
     model_settings_from_env,
 )
 from graphrag_pipeline.extraction.debug_llm import DebuggableOpenAILLM
+from graphrag_pipeline.extraction.schema_v1 import build_schema_v1
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,7 @@ def clear_pipeline_store(pipeline: Any) -> None:
 def build_simple_kg_pipeline(
     driver: Driver,
     settings: OpenRouterSettings | OllamaSettings | None = None,
+    schema: GraphSchema | None = None,
 ) -> SimpleKGPipeline:
     """Assemble, but do not run, the configured extraction pipeline.
 
@@ -81,6 +84,8 @@ def build_simple_kg_pipeline(
             later uses it to persist the generated graph.
         settings: Optional provider settings instance. When omitted, the
             function selects a provider using ``GRAPH_RAG_PROVIDER``.
+        schema: Optional GraphSchema to govern extraction. When omitted for
+            OpenRouter, defaults to the curated domain ``SCHEMA_V1``.
 
     Returns:
         A configured ``SimpleKGPipeline`` using the selected GraphRAG provider.
@@ -132,6 +137,7 @@ def build_simple_kg_pipeline(
             api_key=settings.api_key,
         )
         embedder = OpenAIEmbeddings(model=settings.embedding_model, **client_kwargs)
+        pipeline_schema: GraphSchema | str = schema or build_schema_v1()
     else:
         llm = OllamaLLM(
             model_name=settings.llm_model,
@@ -139,9 +145,7 @@ def build_simple_kg_pipeline(
             host=settings.host,
         )
         embedder = OllamaEmbeddings(model=settings.embedding_model, host=settings.host)
-        schema = "FREE"
-    if isinstance(settings, OpenRouterSettings):
-        schema = None
+        pipeline_schema = "FREE"
     text_splitter = FixedSizeSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
@@ -150,7 +154,7 @@ def build_simple_kg_pipeline(
         llm=llm,
         driver=driver,
         embedder=embedder,
-        schema=schema,
+        schema=pipeline_schema,
         text_splitter=text_splitter,
         from_file=False,
         on_error="RAISE",

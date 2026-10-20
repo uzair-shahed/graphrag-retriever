@@ -20,6 +20,17 @@ from graphrag_pipeline.extraction.provider import (
     ExtractionProvider,
 )
 
+from graphrag_pipeline.extraction.schema_v1 import (
+    DOMAIN_NODE_LABELS,
+    DOMAIN_RELATIONSHIP_TYPES,
+    RESERVED_NODE_LABELS,
+    RESERVED_RELATIONSHIP_TYPES,
+    SCHEMA_V1,
+    SCHEMA_V1_HASH,
+    build_schema_v1,
+    compute_schema_hash,
+    validate_schema_no_reserved_names,
+)
 from graphrag_pipeline.extraction.schemas import (
     EvidenceSpan,
     ExtractionRequest,
@@ -31,6 +42,8 @@ from graphrag_pipeline.extraction.schemas import (
 )
 
 __all__ = [
+    "DOMAIN_NODE_LABELS",
+    "DOMAIN_RELATIONSHIP_TYPES",
     "EvidenceSpan",
     "DeterministicMockProvider",
     "ExtractionProvider",
@@ -38,6 +51,13 @@ __all__ = [
     "ExtractionResult",
     "Mention",
     "Provenance",
+    "RESERVED_NODE_LABELS",
+    "RESERVED_RELATIONSHIP_TYPES",
+    "SCHEMA_V1",
+    "SCHEMA_V1_HASH",
     "Triple",
+    "build_schema_v1",
+    "compute_schema_hash",
     "validate_result_for_request",
+    "validate_schema_no_reserved_names",
 ]

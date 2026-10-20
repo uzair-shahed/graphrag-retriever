@@ -99,8 +99,8 @@ def stub_graph_response(text: str) -> dict[str, Any]:
         props = {"since": acquired.group(3)} if acquired.group(3) else {}
         return {
             "nodes": [
-                {"id": "0", "label": "Company", "properties": {"name": acquired.group(1)}},
-                {"id": "1", "label": "Company", "properties": {"name": acquired.group(2)}},
+                {"id": "0", "label": "Organization", "properties": {"name": acquired.group(1)}},
+                {"id": "1", "label": "Organization", "properties": {"name": acquired.group(2)}},
             ],
             "relationships": [
                 {"start_node_id": "0", "end_node_id": "1", "type": "ACQUIRED", "properties": props}
@@ -112,7 +112,7 @@ def stub_graph_response(text: str) -> dict[str, Any]:
         if name not in STOP_WORDS and name not in names:
             names.append(name)
     names = names[:4]
-    nodes = [{"id": str(i), "label": "Entity", "properties": {"name": n}} for i, n in enumerate(names)]
+    nodes = [{"id": str(i), "label": "Concept", "properties": {"name": n}} for i, n in enumerate(names)]
     rels = [
         {"start_node_id": "0", "end_node_id": str(i), "type": "RELATED_TO", "properties": {}}
         for i in range(1, len(names))
