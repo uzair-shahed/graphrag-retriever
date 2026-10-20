@@ -334,8 +334,8 @@ def test_generate_answer_prompt_includes_bridging_entities() -> None:
     user_prompt = messages[1]["content"]
 
     assert "Bridging entities: Gong, Steve Hillage" in user_prompt
-    assert "[hash_c0] [bridged via: Gong, Steve Hillage] Steve Hillage was in Gong." in user_prompt
-    assert "[hash_c1] [bridged via: Gong] Gong formed in Paris." in user_prompt
+    assert "[hash_c0] (bridged via: Gong, Steve Hillage) Steve Hillage was in Gong." in user_prompt
+    assert "[hash_c1] (bridged via: Gong) Gong formed in Paris." in user_prompt
 
 
 def test_generate_answer_unretrieved_citation_rejected_and_recorded() -> None:

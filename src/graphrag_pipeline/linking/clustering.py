@@ -102,27 +102,35 @@ def create_exact_name_clusters(
 
 def remove_entity_clusters(
     driver: Driver,
-    run_id: str,
+    run_id: str | None = None,
     database: str = "neo4j",
 ) -> int:
-    """Detach and delete all EntityCluster nodes for a specific run_id.
+    """Detach and delete EntityCluster nodes for a specific run_id or all clusters if run_id is None.
 
     Args:
         driver: Active Neo4j driver.
-        run_id: Identifier of the clustering pass to undo.
+        run_id: Optional identifier of the clustering pass to undo. If None, removes all clusters.
         database: Target Neo4j database name.
 
     Returns:
         Number of clusters deleted.
     """
-    delete_query = """
-    MATCH (k:EntityCluster {run_id: $run})
-    DETACH DELETE k
-    RETURN count(k) AS deleted
-    """
-    res, _, _ = driver.execute_query(delete_query, run=run_id, database_=database)
+    if run_id is not None:
+        delete_query = """
+        MATCH (k:EntityCluster {run_id: $run})
+        DETACH DELETE k
+        RETURN count(k) AS deleted
+        """
+        res, _, _ = driver.execute_query(delete_query, run=run_id, database_=database)
+    else:
+        delete_query = """
+        MATCH (k:EntityCluster)
+        DETACH DELETE k
+        RETURN count(k) AS deleted
+        """
+        res, _, _ = driver.execute_query(delete_query, database_=database)
     deleted = res[0]["deleted"] if res else 0
-    logger.info("Removed %d entity clusters for run_id: %s", deleted, run_id)
+    logger.info("Removed %d entity clusters (run_id=%s)", deleted, run_id)
     return deleted
 
 

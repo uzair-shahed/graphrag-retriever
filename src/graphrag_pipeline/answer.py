@@ -140,7 +140,7 @@ def _prompt(request: QueryRequest, retrieval: RetrievalResult, limit: int) -> st
     bridge_prefix = f"Bridging entities: {', '.join(all_bridges)}\n\n" if all_bridges else ""
     context = "\n\n".join(
         f"[{item.paragraph_hash or item.chunk_id}]"
-        + (f" [bridged via: {', '.join(item.graph_references)}]" if item.graph_references else "")
+        + (f" (bridged via: {', '.join(item.graph_references)})" if item.graph_references else "")
         + f" {item.text}"
         for item in evidence
     )
