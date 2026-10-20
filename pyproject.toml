@@ -19,6 +19,9 @@ dependencies = [
 dev = [
     "pytest>=8.0,<9",
 ]
+browser-tests = [
+    "playwright>=1.48,<2",
+]
 
 [project.scripts]
 graphrag-query = "graphrag_pipeline.query_command:main"
@@ -26,6 +29,9 @@ graphrag-eval = "graphrag_pipeline.evaluation.command:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"graphrag_pipeline.evaluation" = ["report_template.html"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

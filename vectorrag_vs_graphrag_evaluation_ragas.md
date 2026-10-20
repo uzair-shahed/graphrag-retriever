@@ -21,6 +21,7 @@ CLI does not use `GRAPH_RAG_DATASET_PATHS` or accept the full/test splits.
 - [`prepare` reference](#prepare-reference)
 - [`check` reference](#check-reference)
 - [`run` reference](#run-reference)
+- [`report` reference](#report-reference)
 - [Examples by use case](#examples-by-use-case)
 - [Provider configuration and precedence](#provider-configuration-and-precedence)
 - [Graph prerequisites](#graph-prerequisites)
@@ -40,7 +41,7 @@ uv run --locked graphrag-eval --help
 General syntax:
 
 ```text
-graphrag-eval {prepare,check,run} [OPTIONS]
+graphrag-eval {prepare,check,run,report} [OPTIONS]
 ```
 
 All examples use `uv run --locked graphrag-eval`. In an activated project
@@ -67,7 +68,8 @@ avoids a RAGAS import failure with 0.4.2. A token-budgeted run may download the
 | `prepare` | Ingest the selected dataset records, or reuse matching completed chunks. | Reads and may write graph data and ingestion checkpoints. | Extraction and embedding calls for missing chunks, using `GRAPH_RAG_PROVIDER`. | JSON ingestion summary on stdout and resumable ingestion state. |
 | `check` | Verify that the selected records and retrieval prerequisites are ready. | Read-only checks of selected chunks, provenance, completion inventory and index configuration. | None; configured model settings are read, but model services are not contacted. | JSON selection/preflight/prerequisite report on stdout. |
 | `run` | Retrieve evidence, generate answers for both backends, and score them with RAGAS and MuSiQue gold labels. | Read-only preflight, retrieval and graph fingerprints. | Retrieval embeddings, answers and RAGAS judging/embeddings. | JSON summary on stdout and files in an evaluation output directory. |
-| Any command with `--dry-run` | Validate and preview the dataset selection and planned paragraph count. | None. | None. | JSON selection and chunk count on stdout; no preparation or evaluation artifacts. |
+| `report` | Generate offline HTML visualizations and record comparisons from an existing run. | None. | None. | `report.html` in the supplied directory; JSON path, row count, and warnings on stdout. |
+| `prepare`, `check`, or `run` with `--dry-run` | Validate and preview the dataset selection and planned paragraph count. | None. | None. | JSON selection and chunk count on stdout; no preparation or evaluation artifacts. |
 
 Use `check` then `run` directly when the selected records are already ingested.
 Use `prepare` explicitly when records are missing. `check` and `run` never
@@ -77,7 +79,8 @@ availability or generate RAGAS scores.
 
 ## Shared options and selection rules
 
-These options are accepted by **all three subcommands**. None is required.
+These options are accepted by **`prepare`, `check`, and `run`**. None is required.
+`report` has its own artifact-only options below.
 
 | Option | Type / default | Description |
 | --- | --- | --- |
@@ -180,7 +183,7 @@ on the selected, already-ingested records. Preflight is built in, so a separate
 saved answer artifacts.
 
 ```text
-graphrag-eval run [SHARED_OPTIONS] [CONDITION_OPTIONS] [RETRIEVAL_OPTIONS] [PROVIDER_OPTIONS] [--output PATH]
+graphrag-eval run [SHARED_OPTIONS] [CONDITION_OPTIONS] [RETRIEVAL_OPTIONS] [PROVIDER_OPTIONS] [--output PATH] [--no-progress]
 ```
 
 In addition to the [shared options](#shared-options-and-selection-rules), the
@@ -190,6 +193,7 @@ complete set of `run` options is:
 | --- | --- | --- |
 | `--condition {record,corpus}` | Choice; repeatable; both when omitted | `record` filters retrieval to the question's record. `corpus` searches the entire existing graph/index. Repeating the flag with different values runs both and reports them separately. |
 | `--output PATH` | Directory; generated `runs/evaluation/<UTC-timestamp>-<unique-suffix>` | Save evaluation artifacts here. A supplied directory must be new or empty. Reuse of a populated directory fails. |
+| `--no-progress` | Switch; off | Hide the default tqdm evaluation bar on stderr. The final JSON summary still prints to stdout. |
 | `--top-k N` | Positive integer; `5` | Request N vector seed chunks for each backend, with the same embedded question and no overfetching. |
 | `--max-context-chunks N` | Positive integer; `5` | Maximum whole evidence chunks retained for answering after retrieval. Does not change `--top-k`. |
 | `--max-context-tokens N` | Positive integer; `4096` | Maximum rendered evidence-context size using the shared `cl100k_base` tokenizer proxy. Fixed instructions and question tokens are additional. |
@@ -212,6 +216,24 @@ GraphRAG: **3 questions × 2 conditions × 2 backends = 12 result rows**.
 Retrieval embeddings still use `GRAPH_RAG_PROVIDER`; set that configuration to
 match the model used to build the graph vectors.
 
+The progress bar counts completed result rows, so this example runs from 0/12
+to 12/12. Each increment follows scoring, flushing the row to `records.jsonl`,
+and updating `summary.json`. Failed answers, abstentions, and metric errors
+also count as completed results once saved. The bar shows the active record
+position, retrieval condition, backend, and answering/scoring phase. It starts
+after preflight and provider setup. A model call can take time without moving
+the counter; the bar does not estimate progress inside individual model calls.
+On interruption, the bar closes and completed artifacts remain available.
+
+To suppress the bar for redirected output or automation:
+
+```sh
+uv run --locked graphrag-eval run --start-record 4 --records 3 --output runs/eval-quiet-4-to-6 --no-progress
+```
+
+This performs the same evaluation with only the final JSON summary on stdout
+(provider diagnostics may still appear on stderr).
+
 For each question, both backends receive the same original question embedding
 and vector seed count. GraphRAG expands each seed's associated entity component;
 VectorRAG keeps its vector-only evidence. Answering uses the shared prompt
@@ -220,9 +242,95 @@ retrieval and the context selected for answering separately. There is no
 `--retrieval-backend` option on this command because both backends always run.
 
 **Output:** a JSON summary on stdout and `preflight.json`, `manifest.json`,
-`records.jsonl` and `summary.json` under the output directory. Details are in
+`records.jsonl`, `summary.json`, and `report.html` under the output directory. Details are in
 [Scores and output](#scores-and-output). The default full-file run produces
 **2,417 × 2 × 2 = 9,668 rows** when every selected query completes.
+
+## `report` reference
+
+Every started `run` automatically builds a self-contained `report.html` after
+saving final JSON artifacts. The `report` command generates or regenerates this
+file for a past or interrupted run without re-running evaluation.
+
+```text
+graphrag-eval report --input PATH
+```
+
+| Option | Type / default | Description |
+| --- | --- | --- |
+| `--input PATH` | Directory; required | Existing evaluation directory containing `manifest.json` and `records.jsonl`. `summary.json` is optional. Atomically replaces only `PATH/report.html`. |
+| `-h`, `--help` | Switch | Show help. |
+
+```sh
+uv run --locked graphrag-eval report --input runs/eval-prepared-4-to-6-part-3
+```
+
+**Output:** JSON containing `report`, `completed_rows`, and `warnings`. This
+command does not load the dataset, connect to Neo4j, or call answer/judge models.
+It accepts no selection, provider, or `--dry-run` options. A successful command
+can describe a partial or failed evaluation; inspect the report's run status.
+
+### Viewing and exporting
+
+Open `PATH/report.html` directly in a browser with JavaScript enabled. No server,
+CDN, external assets, or network access is required. The overview includes:
+
+- Run status, completion counts, graph consistency, and expandable configuration.
+- Separate record-scoped and corpus-wide panels comparing Triad scores, gold
+  answer accuracy/F1, supporting-paragraph and hop coverage, answer outcomes,
+  context tokens, and pipeline latency excluding RAGAS judging.
+- Tables with exact displayed chart values, scored-case counts, metric failures,
+  incomplete traversals, and paired differences.
+
+Search records by ID or question and choose a retrieval condition. The two
+backends appear side by side with the gold answer/aliases, answerability,
+supporting paragraphs, decomposition hops, finalized answers, citations, metric
+outcomes, full retrieved chunks and graph evidence, and exact bounded answer
+context/prompt. Search affects record navigation only; overview charts continue
+to summarize every saved result. Expand long contexts and diagnostics as needed.
+
+| Presentation action | Result |
+| --- | --- |
+| **Download SVG** on a chart | Standalone vector image with title, condition, legend, values, and sample counts; suitable for scaling in slides. |
+| **Download PNG** on a chart | Raster image at twice the chart's base resolution, with a white background. |
+| **Print overview / Save PDF** | Run overview and all condition charts, without record details. Select Save as PDF in the browser print dialog. |
+| **Print selected record / Save PDF** | Selected question and condition, both backends, expanded gold/context details. |
+| **Print entire report / Save PDF** | Overview and every selected record/condition, with expanded context. Large runs may take time and produce many pages. |
+
+Gold labels and evidence are deduplicated within each record. Details are parsed
+on demand. A full-dev report can still be large because the exact saved evidence
+is embedded. Browser PDF printing is supported; automatic PDF generation and
+PowerPoint files are not provided.
+
+### Validation and recovery
+
+Charts preserve existing scoring rules: answer metrics use answered cases only,
+abstentions/failures remain separate, N/A never becomes zero, and conditions are
+never pooled. Tables and charts are recomputed from complete saved rows; missing
+or inconsistent `summary.json` produces a visible warning. Source JSON is not
+modified.
+
+Artifact checks reject unknown schema versions, malformed complete rows,
+duplicate results, inconsistent labels/questions, and evidence/citation
+mismatches. An incomplete final JSONL line may be ignored with a warning.
+Missing results and absent labels for questions that never started are explicit.
+Partial reports are attempted after interruption. Hard process termination or
+storage errors may prevent automatic reporting; rerun `report` after recovery.
+Report failures preserve evaluation artifacts and the original evaluation
+exception; otherwise they cause a nonzero exit. A failed regeneration keeps the
+previous HTML file intact.
+
+The report adds no Python runtime dependencies. Optional browser validation:
+
+```sh
+uv sync --locked --extra dev --extra browser-tests
+uv run --locked --extra browser-tests python -m playwright install chromium
+RUN_REPORT_BROWSER_TESTS=1 uv run --locked --extra browser-tests python -m pytest tests/browser -q -s
+```
+
+For PowerShell, set `$env:RUN_REPORT_BROWSER_TESTS="1"` before the final command
+and omit its POSIX environment-variable prefix. These checks use synthetic
+artifacts, local Chromium, and no model/Neo4j calls.
 
 ## Examples by use case
 
@@ -425,6 +533,15 @@ metric imports. OpenRouter evaluator routing requires requested parameters and
 disables provider fallbacks. Provider credentials are excluded from saved
 configuration.
 
+Ollama structured extraction and answering explicitly send `think: false`.
+The RAGAS Ollama judge uses the OpenAI-compatible `reasoning_effort: "none"`
+control and sends the metric's actual JSON Schema through `response_format`.
+This keeps thinking disabled for the configured model and constrains judge
+output to the metric's fields; JSON-object syntax alone does not enforce those
+fields. Answer requests also honor `OLLAMA_REQUEST_TIMEOUT_SECONDS`, as native
+extraction and embedding requests do. The default remains 120 seconds; evaluator
+metric/request bounds continue to use `RAGAS_TIMEOUT_SECONDS`.
+
 The context budget uses `cl100k_base` as a shared comparison proxy, rather than
 each answer model's native tokenizer. It counts rendered evidence including
 graph lines; the question and fixed instructions consume additional tokens.
@@ -501,8 +618,12 @@ Each output directory contains:
 - `records.jsonl`: durable completed rows with trace/pair IDs, labels, full
   retrieval, exact answer context/prompt, response/citations, scores and timings.
 - `summary.json`: per-condition/backend metrics, denominators and paired deltas.
+- `report.html`: standalone visual summary and searchable record comparisons,
+  with PNG/SVG chart downloads and browser PDF print layouts.
 
-Context/label payloads stay in JSONL rather than accumulating in memory.
+During evaluation, context/label payloads stay in JSONL rather than accumulating
+in memory. Report generation reads the saved rows after evaluation and embeds
+deduplicated contexts and labels in HTML for offline viewing.
 Token usage is stored when the answer wrapper exposes it. Provider price is
 null when unavailable; no price is invented. Existing artifact directories are
 not overwritten. Interrupted runs retain completed rows; rerun a remaining
@@ -516,9 +637,9 @@ failure.
 
 | Code | Meaning | Next action |
 | --- | --- | --- |
-| `0` | Selection preview, preparation, readiness check or evaluation completed successfully. | Inspect the report; a successful run may still contain incorrect answers or abstentions. |
+| `0` | Selection preview, preparation, readiness check, evaluation, or offline report generation completed successfully. | Inspect the report; a successful run may still contain incorrect answers or abstentions. Report generation can succeed for partial evaluation artifacts. |
 | `1` | Preparation has failed/incomplete work, or evaluation has query/metric failures, incomplete graph traversal, seed mismatch or graph-snapshot inconsistency. | Inspect ingestion details or per-row scores/statuses; address the cause before repeating the affected work. |
-| `2` | Invalid arguments/configuration, missing or conflicting selected graph data, unavailable prerequisites, or setup error. | Read the JSON diagnostic/preflight issues. Prepare missing records explicitly; investigate conflicts or correct configuration. |
+| `2` | Invalid arguments/configuration, missing or conflicting selected graph data, unavailable prerequisites, setup error, invalid report artifacts, or HTML generation failure. | Read the JSON diagnostic/preflight issues. Preserve saved evaluation artifacts; resolve the cause and regenerate HTML with `report --input PATH` when applicable. |
 | `130` | User interrupted the operation. | Preparation retains checkpoints; evaluation retains completed rows if artifact writing had begun. |
 
 Evaluation output directories must be new or empty. To repeat an evaluation,
@@ -597,3 +718,112 @@ installed parser, 38 evaluation example commands parsed successfully, seven
 offline previews selected the expected records, and 40 local file/section links
 resolved. `git diff --check` passed. Documentation validation contacted no
 database or model service and made no ingestion/evaluation writes.
+
+### Troubleshooting records 4–6 (20 October 2026)
+
+The requested `prepare`, `check`, and `run` commands were exercised against the
+actual dev records and configured local services. The tool shell did not have
+`uv` on PATH, so the installed `.venv/bin/uv` executable was used with the same
+`run --locked graphrag-eval ...` arguments. No global PATH or `.env` values
+were changed.
+
+The selected records already had 58 verified paragraphs. Paragraphs 4 and 15
+of record `2hop__481349_302087` had repeated `ReadTimeout` failures and were
+absent from Neo4j. This made both `check` and `run` correctly reject the cohort.
+The configured `qwen3:4b` model reported thinking support, while extraction's
+explicit `think: false` setting had been commented out. The existing pipeline
+regression test also failed on that missing field.
+
+The user explicitly chose to retain `qwen3:4b` and disable thinking for
+structured extraction, answering and RAGAS judging. The fix restores the
+native extraction flag, adds it to answers, applies the configured native
+answer timeout, and sets `reasoning_effort: "none"` for the Ollama judge.
+Model identifiers, 120-second native request timeout and generation-token
+limits were retained. With that fix, the two missing paragraphs completed
+during a 6.343-second preparation run.
+
+A subsequent evaluation exposed a separate judge-output defect: RAGAS's default
+JSON-object mode allowed `qwen3:4b` to echo `user_input`/`context` instead of
+returning required score fields such as `rating`. The Ollama evaluator now
+uses Instructor's JSON Schema mode to enforce each metric's response schema;
+OpenRouter's evaluator path retains its existing behavior. Offline HTTP tests
+verify the actual non-thinking and schema fields sent through the SDK.
+
+The intermediate evaluation was interrupted and its artifacts preserved at
+`runs/eval-prepared-4-to-6-json-object-attempt-20261020T144039Z`. The completed
+rerun occupies the originally requested `runs/eval-prepared-4-to-6` directory.
+
+| Requested command | Final result |
+| --- | --- |
+| `uv run --locked graphrag-eval prepare --start-record 4 --records 3` | Exit 0; three records loaded, all 60 paragraphs verified, 58 reused and two newly ingested; no failures/investigation cases. |
+| `uv run --locked graphrag-eval check --start-record 4 --records 3` | Exit 0; selected graph data, 768-dimensional index and `record_id` filtering verified. |
+| `uv run --locked graphrag-eval run --start-record 4 --records 3 --output runs/eval-prepared-4-to-6` | Exit 0; all 12 expected rows completed, no query/metric failures, complete traversal and matching graph fingerprints. |
+
+The measured answer outcomes are four answers and eight abstentions, with zero
+normalized exact gold-answer matches. These are retained evaluation findings.
+Under the agreed answered-only policy, faithfulness and answer relevance are
+scored for the four answered rows; context relevance is scored for all twelve.
+Abstained rows correctly have null/not-applicable answer metrics.
+
+Validation: **318 unit tests passed**. Artifact checks verified twelve unique
+trace IDs, six paired question/condition IDs, unchanged original questions,
+matching response/answer evidence, citations within the supplied context,
+consistent vector seeds and complete graph traversal. Detailed local evidence
+is in `runs/evaluation-troubleshooting/records-4-to-6.json`; the evaluation
+scores and full traces are in `runs/eval-prepared-4-to-6/summary.json` and
+`records.jsonl`. No live OpenRouter calls were made.
+
+### Evaluation progress bar — October 20, 2026
+
+Implemented default tqdm progress for `run`, with `--no-progress` suppression,
+active record/condition/backend/phase display, and increments after durable
+result and summary writes. The bar uses stderr, preserving JSON on stdout,
+and closes on interruption. Existing tqdm dependency reused.
+
+Validation: **325 unit tests passed**. Added coverage for one or three records,
+one or both conditions (including the requested 12-result total), saved query
+and metric failures, stderr output, disabled progress, CLI option forwarding,
+and partial artifacts on interruption. CLI help and `git diff --check` also
+passed. These checks used fake retrieval and provider clients; no additional
+live model calls were needed for this display change. No unexpected runtime
+or dependency problems were found.
+
+### Offline HTML reports — October 20, 2026
+
+Completed the approved report implementation:
+
+1. Artifact-only validation and per-record deduplication preserve gold labels,
+   exact retrieved evidence, bounded context, prompts, score statuses, and counts.
+2. Self-contained HTML provides separate condition charts, searchable record
+   comparisons, supporting paragraphs/decomposition, citations, graph evidence,
+   diagnostics, standalone PNG/SVG chart downloads, and three PDF print scopes.
+3. `run` generates reports after finalizing JSON, including partial runs where
+   possible. `report --input PATH` regenerates HTML offline and replaces no source
+   JSON. Original evaluation errors survive report failures.
+4. README, operational documentation, CLI reference, tests, and package-data
+   configuration have been updated. Playwright is a locked optional test extra;
+   browser viewing and report generation require no new runtime dependency.
+
+Validation evidence:
+
+- Full unit suite: **346 passed**. Report-specific tests cover source alignment,
+  zero versus unavailable scores, abstentions/failures, incomplete/truncated
+  artifacts, duplicate/corrupt rows, safe embedding, offline regeneration,
+  interruption, and report-generation failures.
+- Opt-in Chromium suite: **6 passed**. Checked offline search, condition changes,
+  exact context display, PNG/SVG downloads, PDF scopes, and script-injection text.
+- Synthetic full-dev-sized report: **2,417 records / 9,668 rows**, approximately
+  **42.2 MB HTML**, generated in **1.31 s**, opened in **0.13 s**, searched in
+  **0.009 s** on the local test machine. These measurements use synthetic fixture
+  evidence; actual report size and timings depend on saved graph/context sizes.
+- Existing `eval-prepared-4-to-6-part-3` run: generated `report.html` (**202,855
+  bytes**) with no warnings; browser validation checked all twelve row contexts
+  and gold supporting paragraphs, and overview values match `summary.json`.
+  Details are in that run's `report-validation.json`; sample PNG/SVG/PDF exports
+  are in its `presentation/` directory.
+- Wheel build includes `evaluation/report_template.html`; CLI help and
+  `git diff --check` passed. No live Neo4j or model calls were needed.
+
+No unexpected report runtime problems remain. Full-report printing deliberately
+expands all record/condition contexts and can be expensive for large runs. No
+implementation subtasks remain for the approved report plan.

@@ -106,8 +106,9 @@ def build_answer_llm(
     return OllamaJSONSchemaLLM(
         model_name=model_settings.llm_model,
         response_model=GeneratedAnswer,
-        model_params={"options": {"temperature": 0, "num_predict": model_settings.llm_max_tokens}},
+        model_params={"think": False, "options": {"temperature": 0, "num_predict": model_settings.llm_max_tokens}},
         host=model_settings.host,
+        timeout=model_settings.request_timeout_seconds,
     )
 
 

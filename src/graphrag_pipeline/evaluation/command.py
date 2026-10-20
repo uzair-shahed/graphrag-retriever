@@ -1,4 +1,4 @@
-"""Explicit prepare/check/run commands for paired evaluation of MuSiQue ans dev."""
+"""Prepare/check/run paired MuSiQue ans-dev evaluation, or report saved results offline."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from graphrag_pipeline.config import Neo4jSettings, OllamaSettings, OpenRouterSe
 from graphrag_pipeline.diagnostics import exception_diagnostics
 from graphrag_pipeline.evaluation.providers import EvaluatorSettings, build_metrics
 from graphrag_pipeline.evaluation.records import DEFAULT_DATASET, load_cases
+from graphrag_pipeline.evaluation.report import generate_report
 from graphrag_pipeline.evaluation.runner import run_evaluation, write_json
 from graphrag_pipeline.evaluation.runtime import EvaluationSettings, PairedRetriever, graph_readiness, graph_snapshot
 from graphrag_pipeline.ingestion.load_musique_dataset import load_selected_records
@@ -25,6 +26,8 @@ from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
+    report = subcommands.add_parser("report", help="Generate offline report.html from saved evaluation artifacts.")
+    report.add_argument("--input", type=Path, required=True, help="Existing evaluation directory; replaces only its report.html.")
     for name in ("prepare", "check", "run"):
         command = subcommands.add_parser(name)
         command.add_argument("--dataset-path", type=Path, default=DEFAULT_DATASET)
@@ -40,6 +43,7 @@ def build_parser():
         else:
             command.add_argument("--condition", action="append", choices=("record", "corpus"), help="Repeat; defaults to both.")
         if name == "run":
+            command.add_argument("--no-progress", action="store_true", help="Disable the tqdm evaluation progress bar; final JSON is still printed.")
             command.add_argument("--output", type=Path, help="New artifact directory under runs/ by default.")
             command.add_argument("--top-k", type=int, default=5)
             command.add_argument("--max-context-chunks", type=int, default=5)
@@ -65,6 +69,8 @@ def public_model_settings(settings):
 
 
 async def execute(args):
+    if args.command == "report":
+        return 0, generate_report(args.input)
     cases = selection_from_args(args)
     selection = {"dataset": str(args.dataset_path), "dataset_sha256": cases[0].source_sha256,
                  "records_selected": len(cases), "records": [{"id": c.gold.id, "source_line": c.source_line} for c in cases]}
@@ -116,7 +122,8 @@ async def execute(args):
                     "index": asdict(index), "neo4j_database": neo4j.database,
                     "query_policy": "original question only; no title hints or gold decomposition",
                     "answer_policy": "shared generator and validator for vector and graph-expanded evidence"},
-                snapshot=lambda: graph_snapshot(connection, neo4j.database), metric_timeout=evaluator.timeout)
+                snapshot=lambda: graph_snapshot(connection, neo4j.database), metric_timeout=evaluator.timeout,
+                show_progress=not args.no_progress)
         finally:
             await client.close()
         failed = (summary["snapshot_consistent"] is not True or

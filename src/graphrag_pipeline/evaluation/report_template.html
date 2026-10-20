@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'">
+<title>VectorRAG vs. GraphRAG · Evaluation report</title>
+<style>
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172c3e;background:#f2f5f8;line-height:1.55;font-size:15px}
+*{box-sizing:border-box}body{margin:0}header{background:#132d40;color:white;padding:32px max(24px,calc((100vw - 1320px)/2))}header h1{font-size:30px;line-height:1.2;margin:8px 0}header p{color:#cbd9e4;margin:8px 0}.eyebrow{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#81d2ca}
+main{max-width:1368px;margin:auto;padding:24px}h2{font-size:23px;margin-top:0}h3{font-size:18px;margin-top:0}h4{margin:16px 0 8px}.panel,.chart-card,.backend{background:white;border:1px solid #dbe3eb;border-radius:12px;padding:22px;margin-bottom:20px;min-width:0}.muted{color:#536879;font-size:13px}.notice{padding:12px 16px;background:#fff5da;border-left:4px solid #bd7b16;margin:10px 0;white-space:pre-wrap}.error{background:#fff0ee;border-color:#b84838}.badge{display:inline-block;border:1px solid #dbe3eb;border-radius:6px;padding:2px 8px;font-size:12px;margin:3px 6px 3px 0;overflow-wrap:anywhere}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:18px 0}.stat{padding:15px;background:#f4f8fb;border-radius:8px}.stat strong{display:block;font-size:24px}.tools{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0}button,select,input{font:inherit;border:1px solid #bdcbd5;border-radius:7px;padding:8px 12px;background:white;color:#172c3e}button{cursor:pointer;font-weight:600}button:hover{background:#eaf3f8}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #00a59b;outline-offset:2px}input{min-width:260px;flex:1}select{max-width:100%}.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,500px),1fr));gap:18px}.chart-card{margin:0;padding:16px}.chart-card svg{width:100%;height:auto;display:block}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #e1e7ed;text-align:left;padding:8px;vertical-align:top}th{background:#f5f8fa}caption{text-align:left;font-weight:600;margin:8px 0}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:18px}.backend.vectorrag{border-top:4px solid #147d92}.backend.graphrag{border-top:4px solid #9559bb}pre,.context{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:13px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;background:#f6f8fa;border-radius:6px;padding:12px;max-height:440px;overflow:auto}details{border-top:1px solid #e1e7ed;margin:10px 0;padding-top:10px}summary{cursor:pointer;font-weight:600;overflow-wrap:anywhere}.answer{font-size:17px;white-space:pre-wrap;overflow-wrap:anywhere}.question{font-size:21px;line-height:1.45}a{color:#126b87}#export-status{min-height:24px}#print-records{display:none}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0)}.record-select{min-width:240px;flex:2}#record-status{font-size:13px;color:#536879}.print-heading{display:none}
+@media(max-width:760px){.comparison{grid-template-columns:1fr}main{padding:14px}.panel,.backend{padding:16px}header{padding:24px}.tools>*{max-width:100%}}
+@media print{@page{size:A4 landscape;margin:12mm}body{background:white;font-size:10pt}header{background:white;color:#172c3e;padding:0 0 15px}header p{color:#536879}main{padding:0;max-width:none}.no-print,.tools,button,#export-status,nav{display:none!important}.panel,.chart-card,.backend{border:1px solid #bccbd5;border-radius:0;box-shadow:none;padding:12px}.charts{display:block}.chart-card{break-inside:avoid;margin-bottom:16px}.chart-card svg{max-height:100mm}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:12px}pre,.context{max-height:none;overflow:visible}.print-heading{display:block}body[data-print="overview"] #record-section,body[data-print="overview"] #print-records{display:none!important}body[data-print="record"] #overview,body[data-print="record"] #print-records{display:none!important}body[data-print="all"] #record-section{display:none!important}body[data-print="all"] #print-records{display:block}#print-records>article{break-before:page}h2,h3,summary{break-after:avoid}details{break-inside:auto}table{font-size:9pt}}
+</style>
+</head>
+<body>
+<header><div class="eyebrow">MuSiQue · paired evaluation</div><h1>VectorRAG vs. GraphRAG</h1><p>RAG Triad, gold-label agreement, and the evidence behind each answer.</p></header>
+<main>
+<div class="tools no-print" aria-label="Report export"><button id="print-overview">Print overview / Save PDF</button><button id="print-record">Print selected record / Save PDF</button><button id="print-all">Print entire report / Save PDF</button></div>
+<p id="export-status" class="muted no-print" role="status" aria-live="polite"></p>
+<noscript><p class="notice">Enable JavaScript to view this self-contained offline report. Source results remain available in the evaluation JSON artifacts.</p></noscript>
+<section id="overview" aria-labelledby="overview-title">
+<div class="panel"><h2 id="overview-title">Run overview</h2><div id="run-stats" class="stats"></div><div id="warnings"></div><details><summary>Configuration and provenance</summary><pre id="configuration"></pre></details><p class="muted">Faithfulness and answer relevance include answered cases only. N/A is not zero. Context relevance may also be scored for abstentions. Every metric displays its scored-case count. Charts summarize all saved results for their labeled retrieval condition; searching records does not change these aggregates.</p></div>
+<div id="condition-panels"></div>
+</section>
+<section id="record-section" aria-labelledby="records-title">
+<div class="panel"><h2 id="records-title">Explore individual records</h2><div class="tools"><label class="sr-only" for="search">Search questions or record IDs</label><input id="search" type="search" placeholder="Search question or record ID"><label class="sr-only" for="record-select">Record</label><select id="record-select" class="record-select"></select><label for="condition-select">Condition</label><select id="condition-select"></select></div><p id="record-status" role="status"></p><p class="muted">Gold context means MuSiQue supporting paragraphs. Full retrieved evidence and the bounded context shown to the answer model are displayed separately.</p></div>
+<div id="record-detail"></div>
+</section>
+<section id="print-records" aria-label="All record comparisons"></section>
+</main>
+<script type="application/json" id="report-data">__REPORT_HEADER__</script>
+__REPORT_RECORDS__
+<script>
+"use strict";
+const data = JSON.parse(document.getElementById("report-data").textContent);
+const names = {vectorrag:"VectorRAG",graphrag:"GraphRAG"};
+const colors = {vectorrag:"#147d92",graphrag:"#9559bb"};
+const conditions = data.manifest.settings.conditions;
+const byId = id => document.getElementById(id);
+const fmt = value => value === null || value === undefined ? "N/A" : typeof value === "number" ? Number(value.toFixed(3)).toLocaleString("en-US") : String(value);
+function el(tag, text, cls) {const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;}
+function table(headers, rows, caption) {const t=el("table");if(caption)t.append(el("caption",caption));const tr=el("tr");headers.forEach(h=>tr.append(el("th",h)));const head=el("thead");head.append(tr);t.append(head);const body=el("tbody");rows.forEach(values=>{const r=el("tr");values.forEach(v=>r.append(el("td",fmt(v))));body.append(r)});t.append(body);return t;}
+function disclosure(title, content, open=false){const d=el("details");d.open=open;d.append(el("summary",title));d.append(typeof content==="string"?el("pre",content):content);return d;}
+function json(value){return JSON.stringify(value,null,2);}
+function labelCondition(c){return c==="record"?"Record-scoped retrieval":"Corpus-wide retrieval";}
+function stat(label,value){const n=el("div",undefined,"stat");n.append(el("span",label),el("strong",value));return n;}
+byId("run-stats").append(stat("Selected records",data.records.length),stat("Saved / expected results",`${data.summary.completed_rows} / ${data.summary.expected_rows}`),stat("Run status",data.manifest.status),stat("Snapshot consistent",data.summary.snapshot_consistent===true?"Yes":data.summary.snapshot_consistent===false?"No":"Unverified"));
+byId("configuration").textContent=json(data.manifest);
+data.warnings.forEach(w=>byId("warnings").append(el("p",w,"notice")));
+const specifications=[
+ {title:"RAG Triad",unit:"Score",metrics:[["Faithfulness",g=>g.metrics.faithfulness],["Answer relevance",g=>g.metrics.answer_relevancy],["Context relevance · answer context",g=>g.metrics.context_relevance]]},
+ {title:"Gold answer agreement",unit:"Score",metrics:[["Answer accuracy",g=>g.answer_accuracy],["Answer F1",g=>g.answer_f1]]},
+ {title:"Gold context coverage",unit:"Score",metrics:[["Supporting-paragraph recall · retrieved",g=>g.supporting_recall],["Supporting-paragraph precision · retrieved",g=>g.supporting_precision],["Decomposition-hop coverage · retrieved",g=>g.hop_coverage],["Supporting-paragraph recall · answer context",g=>g.answer_context_supporting_recall]]},
+ {title:"Answer outcomes",unit:"Result count",metrics:[["Answered",g=>({mean:g.statuses.succeeded||0,count:g.queries})],["Abstained",g=>({mean:g.statuses.insufficient_evidence||0,count:g.queries})],["Failed",g=>({mean:g.statuses.failed||0,count:g.queries})]]},
+ {title:"Answer context size",unit:"Mean cl100k proxy tokens",metrics:[["Context tokens",g=>g.context_tokens]]},
+ {title:"Pipeline latency · excludes RAGAS judging",unit:"Mean seconds · embedding + retrieval + answering",metrics:[["Pipeline seconds",g=>g.latency_seconds]]}
+];
+const svgNS="http://www.w3.org/2000/svg";
+function svgElement(tag,attrs,text){const n=document.createElementNS(svgNS,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,String(v)));if(text!==undefined)n.textContent=text;return n;}
+function drawChart(condition,spec){
+ const card=el("article",undefined,"chart-card");card.append(el("h3",spec.title));
+ const groups=Object.fromEntries(Object.keys(names).map(b=>[b,data.summary.groups[`${condition}/${b}`]]));
+ const items=spec.metrics.map(([label,get])=>({label,values:Object.fromEntries(Object.keys(names).map(b=>[b,groups[b]?get(groups[b]):{mean:null,count:0}]))}));
+ const height=116+items.length*92, svg=svgElement("svg",{viewBox:`0 0 820 ${height}`,width:820,height,role:"img","aria-label":`${spec.title} — ${labelCondition(condition)}`});
+ svg.append(svgElement("title",{},`${spec.title} — ${labelCondition(condition)}`),svgElement("rect",{width:820,height,fill:"white"}));
+ const text=(x,y,s,size=14,fill="#172c3e")=>svgElement("text",{x,y,"font-family":"Arial, sans-serif","font-size":size,fill},s);
+ svg.append(text(20,26,spec.title,19),text(20,49,`${labelCondition(condition)} · ${spec.unit}`,13,"#536879"));
+ Object.keys(names).forEach((b,i)=>{const x=20+i*180;svg.append(svgElement("rect",{x,y:65,width:13,height:13,fill:colors[b]}),text(x+20,77,names[b],13))});
+ const values=items.flatMap(i=>Object.values(i.values).map(v=>v.mean)).filter(v=>typeof v==="number");
+ const low=Math.min(0,...values), high=Math.max(1,...values), left=365, width=280, scale=v=>left+(v-low)/(high-low)*width, zero=scale(0);
+ const rows=[];
+ items.forEach((item,i)=>{const y=110+i*92;svg.append(text(20,y+22,item.label,12));Object.keys(names).forEach((b,j)=>{const result=item.values[b],yy=y+j*30;const n=result.mean;svg.append(svgElement("rect",{x:left,y:yy,width,height:21,fill:"#edf2f6"}));if(typeof n==="number"){svg.append(svgElement("rect",{x:Math.min(zero,scale(n)),y:yy,width:Math.abs(scale(n)-zero),height:21,fill:colors[b]}));}svg.append(text(660,yy+16,`${fmt(n)} (n=${result.count})`,12));});rows.push([item.label,...Object.keys(names).map(b=>`${fmt(item.values[b].mean)} (n=${item.values[b].count})`)]);});
+ card.append(svg);
+ const tools=el("div",undefined,"tools no-print");const filename=`${condition}-${spec.title.toLowerCase().replace(/[^a-z0-9]+/g,"-")}`;
+ ["SVG","PNG"].forEach(format=>{const button=el("button",`Download ${format}`);button.setAttribute("aria-label",`Download ${spec.title} for ${condition} as ${format}`);button.onclick=()=>exportChart(svg,filename,format).catch(e=>byId("export-status").textContent=`Export failed: ${e.message}`);tools.append(button)});
+ card.append(tools,table(["Metric / outcome","VectorRAG","GraphRAG"],rows,"Chart values (n = scored cases; outcomes use saved-result count)"));return card;
+}
+async function exportChart(svg,name,format){
+ const source=new XMLSerializer().serializeToString(svg);let blob=new Blob([source],{type:"image/svg+xml;charset=utf-8"});
+ if(format==="PNG"){
+  const url=URL.createObjectURL(blob);try{const image=new Image();await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error("Could not render SVG image"));image.src=url});const canvas=document.createElement("canvas");canvas.width=Number(svg.getAttribute("width"))*2;canvas.height=Number(svg.getAttribute("height"))*2;const ctx=canvas.getContext("2d");ctx.fillStyle="white";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/png"));if(!blob)throw new Error("PNG encoding failed");}finally{URL.revokeObjectURL(url)}
+ }
+ const url=URL.createObjectURL(blob),a=el("a");a.href=url;a.download=`${name}.${format.toLowerCase()}`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);byId("export-status").textContent=`Downloaded ${a.download}`;
+}
+conditions.forEach(condition=>{
+ const section=el("section",undefined,"panel");section.append(el("h2",labelCondition(condition)));
+ const health=Object.keys(names).map(b=>{const g=data.summary.groups[`${condition}/${b}`];return [names[b],g?.queries||0,g?fmt(g.abstention_rate):"N/A",g?fmt(g.failure_rate):"N/A",g?.traversal_incomplete??"N/A",g?Object.values(g.metric_failures).reduce((a,b)=>a+b,0):"N/A",g?.retrieval_context_metric_failures??"N/A"]});
+ section.append(table(["Backend","Saved results","Abstention rate","Failure rate","Incomplete traversals","Triad metric errors","Full-context metric errors"],health));
+ const charts=el("div",undefined,"charts");specifications.forEach(spec=>charts.append(drawChart(condition,spec)));section.append(charts);
+ const deltas=data.summary.paired_deltas_graphrag_minus_vectorrag[condition]||{};section.append(disclosure("Paired differences · GraphRAG minus VectorRAG",table(["Metric","Mean difference","Matched pairs"],Object.entries(deltas).map(([name,value])=>[name,value.mean,value.count]))));byId("condition-panels").append(section);
+});
+let sequence=0;
+function loadRecord(index){return JSON.parse(byId(`record-data-${index}`).textContent);}
+function resultView(record,condition,backend,prefix){
+ const panel=el("section",undefined,`backend ${backend}`);panel.append(el("h3",names[backend]));const row=record.results[`${condition}/${backend}`];
+ if(!row){panel.append(el("p","Missing result — this backend/condition has no saved row.","notice"));return panel;}
+ const r=row.response;panel.append(el("span",r.status,"badge"),el("span",`Gold answer match: ${row.gold.answer_correct?"Yes":"No"}`,"badge"),el("p",r.answer??(r.status==="insufficient_evidence"?"Insufficient evidence — system abstained.":"No answer produced."),"answer"));
+ if(r.error)panel.append(el("p",r.error,"notice error"));
+ if(!row.graph_component_complete)panel.append(el("p","Incomplete graph traversal.","notice"));
+ if(!row.paired_seeds_consistent)panel.append(el("p","Vector seeds differ or retrieval failed; this pair is not a controlled comparison.","notice"));
+ const scores=Object.entries(row.ragas).map(([name,s])=>[name,s.status,s.value,s.reason??(s.error?json(s.error):"")]);panel.append(table(["RAGAS metric","Status","Value","Reason / error"],scores));
+ panel.append(table(["Gold / evidence metric","Value"],[["Answer F1",row.gold.answer_f1],["Answerability correct",row.gold.answerability_correct],["Supporting recall · retrieved",row.retrieval_gold.supporting_recall],["Supporting precision · retrieved",row.retrieval_gold.supporting_precision],["Hop coverage · retrieved",row.retrieval_gold.hop_coverage],["Supporting recall · answer context",row.answer_context_gold.supporting_recall],["Citation gold-support precision",row.answer_context_gold.citation_gold_support_precision],["Context tokens · cl100k proxy",row.context_tokens]]));
+ const coverage=el("div");coverage.append(table(["Hop","Support paragraph","Retrieved","In answer context"],(row.retrieval_gold.hops||[]).map(h=>[h.hop_id,h.paragraph_support_idx,h.covered,(row.answer_context_gold.hops||[]).find(a=>a.hop_id===h.hop_id)?.covered])));panel.append(disclosure("Decomposition-hop coverage",coverage));
+ const citationBox=el("div");if(!r.citations.length)citationBox.append(el("p","No citations."));r.citations.forEach(id=>{const p=el("p"),a=el("a",id);const pos=row.retrieval_evidence.findIndex(i=>record.evidence[i].chunk_id===id);a.href=`#${prefix}-${backend}-chunk-${pos}`;a.onclick=()=>{let d=byId(`${prefix}-${backend}-chunk-${pos}`);while(d){if(d.tagName==="DETAILS")d.open=true;d=d.parentElement}};p.append(a);citationBox.append(p)});panel.append(disclosure("Answer citations",citationBox));
+ const context=record.texts[row.answer_context];panel.append(disclosure(record.texts[row.answer_prompt]===null?"Selected bounded context · answer model was not invoked":"Exact bounded context shown to the answer model",context));
+ panel.append(disclosure("Exact answer prompt (when invoked)",record.texts[row.answer_prompt]??"Answer model was not invoked."));
+ const retrieved=el("div");if(!row.retrieval_evidence.length)retrieved.append(el("p","No evidence retrieved."));
+ row.retrieval_evidence.forEach((i,pos)=>{const e=record.evidence[i],p=(record.labels?.paragraphs||[]).find(p=>`musique:${record.id}:paragraph:${p.idx}`===e.chunk_id&&p.paragraph_text===e.text),body=el("div");body.append(el("p",`Chunk: ${e.chunk_id}`,"muted"),el("p",`Vector score: ${fmt(e.score)} · Shown to model: ${row.answer_evidence.includes(i)?"Yes":"No"} · Gold supporting paragraph: ${p?.is_supporting?"Yes":p?"No":"Not a matching gold paragraph"}`,"muted"),el("pre",e.text));const graph={references:e.graph_references,nodes:e.graph_nodes,relationships:e.graph_relationships,component_complete:e.graph_component_complete};body.append(disclosure(`Graph evidence · ${e.graph_nodes.length} nodes / ${e.graph_relationships.length} relationships`,json(graph)),disclosure("Chunk provenance",json({document_id:e.document_id,source_file:e.source_file,source_line:e.source_line})));const d=disclosure(`${pos+1}. ${p?.title||e.chunk_id}`,body);d.id=`${prefix}-${backend}-chunk-${pos}`;retrieved.append(d)});
+ panel.append(disclosure(`Full retrieved evidence · ${row.retrieval_evidence.length} chunks`,retrieved));
+ panel.append(disclosure("Full-retrieval context relevance",json(row.retrieval_context_relevance)),disclosure("Timings · total_seconds excludes RAGAS judging",json(row.timings)),disclosure("Trace and support diagnostics",json({trace_id:row.trace_id,pair_id:row.pair_id,graph_added_supporting_chunk_ids:row.graph_added_supporting_chunk_ids,retrieval_gold:row.retrieval_gold,answer_context_gold:row.answer_context_gold})));
+ return panel;
+}
+function renderRecord(record,condition){
+ const root=el("article"),gold=el("div",undefined,"panel"),labels=record.labels;const prefix=`record-view-${sequence++}`;
+ gold.append(el("h2",labels?.question||"No question available — no saved result for this record.","question"),el("p",`${record.id} · source line ${record.source_line} · ${labelCondition(condition)}`,"muted"));
+ if(labels){gold.append(el("h3","Gold answer"),el("p",labels.answer??"No gold answer.","answer"),el("p",`Aliases: ${labels.answer_aliases.length?labels.answer_aliases.join(" · "):"None"}`),el("span",`Answerable: ${labels.answerable?"Yes":"No"}`,"badge"));const contexts=el("div");labels.paragraphs.filter(p=>p.is_supporting).forEach(p=>contexts.append(disclosure(`Paragraph ${p.idx} · ${p.title}`,p.paragraph_text)));if(!contexts.children.length)contexts.append(el("p","No supporting paragraphs labeled."));gold.append(disclosure("Gold supporting context",contexts,true));gold.append(disclosure("Gold multi-hop decomposition · evaluation labels only",table(["Hop","Question","Gold hop answer","Support paragraph"],labels.question_decomposition.map(h=>[h.id,h.question,h.answer,h.paragraph_support_idx]))));const distractors=el("div");labels.paragraphs.filter(p=>!p.is_supporting).forEach(p=>distractors.append(disclosure(`Paragraph ${p.idx} · ${p.title}`,p.paragraph_text)));gold.append(disclosure("Other dataset paragraphs · distractors",distractors));}else gold.append(el("p","Gold labels are unavailable because no result was saved. The report never reloads the dataset.","notice"));
+ const comparison=el("div",undefined,"comparison");Object.keys(names).forEach(b=>comparison.append(resultView(record,condition,b,prefix)));root.append(gold,comparison);return root;
+}
+conditions.forEach(c=>{const option=el("option",labelCondition(c));option.value=c;byId("condition-select").append(option)});
+function showRecord(){const value=byId("record-select").value;byId("record-detail").replaceChildren();if(value!=="")byId("record-detail").append(renderRecord(loadRecord(Number(value)),byId("condition-select").value));}
+function searchRecords(){const query=byId("search").value.toLowerCase(),previous=byId("record-select").value,select=byId("record-select");select.replaceChildren();data.records.forEach((r,i)=>{if(`${r.id} ${r.question}`.toLowerCase().includes(query)){const o=el("option",`${r.id} — ${r.question}`);o.value=String(i);select.append(o)}});if([...select.options].some(o=>o.value===previous))select.value=previous;byId("record-status").textContent=`${select.options.length} of ${data.records.length} records match. Overview charts always show all saved results.`;showRecord();}
+byId("search").addEventListener("input",searchRecords);byId("record-select").addEventListener("change",showRecord);byId("condition-select").addEventListener("change",showRecord);searchRecords();
+let printState=[];
+function preparePrint(scope){document.body.dataset.print=scope;printState=[...document.querySelectorAll("details")].map(d=>[d,d.open]);document.querySelectorAll(scope==="overview"?"#overview details":"#record-detail details, #print-records details").forEach(d=>d.open=true);}
+function restorePrint(){printState.forEach(([d,open])=>d.open=open);printState=[];delete document.body.dataset.print;byId("print-records").replaceChildren();}
+window.addEventListener("afterprint",restorePrint);
+byId("print-overview").onclick=()=>{preparePrint("overview");window.print()};
+byId("print-record").onclick=()=>{if(!byId("record-detail").children.length){byId("export-status").textContent="Select a record before printing.";return}preparePrint("record");window.print()};
+byId("print-all").onclick=async()=>{byId("export-status").textContent="Preparing every record and condition for printing. Large runs may take time.";const target=byId("print-records");target.replaceChildren();for(let i=0;i<data.records.length;i++){const r=loadRecord(i);conditions.forEach(c=>target.append(renderRecord(r,c)));if(i%10===0)await new Promise(resolve=>requestAnimationFrame(resolve));}preparePrint("all");window.print();};
+</script>
+</body>
+</html>

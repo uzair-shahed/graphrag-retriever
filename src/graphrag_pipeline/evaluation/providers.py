@@ -61,7 +61,23 @@ def build_metrics(settings: EvaluatorSettings):
     kwargs = {"temperature": 0, "max_tokens": settings.max_tokens, "max_retries": settings.retries + 1}
     if settings.provider == "openrouter":
         kwargs["extra_body"] = {"provider": {"require_parameters": True, "allow_fallbacks": False}}
-    llm = llm_factory(settings.llm_model, provider="openai", client=client, **kwargs)
+    else:
+        # Ollama's OpenAI-compatible endpoint uses reasoning_effort to control
+        # thinking. Native /api/chat uses think=False instead.
+        kwargs["reasoning_effort"] = "none"
+    if settings.provider == "ollama":
+        import instructor
+        from ragas.llms.base import InstructorLLM
+
+        # RAGAS's default factory uses JSON-object mode, which guarantees
+        # syntax but permits a local judge to echo the prompt's input schema.
+        # Send the actual metric response schema to Ollama's constrained decoder.
+        llm = InstructorLLM(
+            client=instructor.from_openai(client, mode=instructor.Mode.JSON_SCHEMA),
+            model=settings.llm_model, provider="openai", **kwargs,
+        )
+    else:
+        llm = llm_factory(settings.llm_model, provider="openai", client=client, **kwargs)
     embeddings = OpenAIEmbeddings(client=client, model=settings.embedding_model)
     return {
         "faithfulness": Faithfulness(llm=llm),

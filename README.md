@@ -15,6 +15,7 @@ and GraphRAG. The supported source is
 | `prepare` | Ingest missing selected records and reuse verified chunks; may write Neo4j and call extraction/embedding models. | `graphrag-eval prepare --start-record 4 --records 3` |
 | `check` | Read-only verification of selected records and graph/index prerequisites; makes no model calls. | `graphrag-eval check --start-record 4 --records 3` |
 | `run` | Check readiness, generate paired answers and RAGAS/gold scores, and write evaluation artifacts. Never ingests data. | `graphrag-eval run --start-record 4 --records 3 --output runs/evaluation-4-to-6` |
+| `report` | Generate or regenerate offline `report.html` from saved artifacts, without Neo4j, dataset access, or models. | `graphrag-eval report --input runs/evaluation-4-to-6` |
 
 Run the commands from the repository root using the locked environment. Start
 with a selection preview, which needs neither Neo4j nor model services:
@@ -48,6 +49,30 @@ IDs and cannot be mixed with range flags. Use `--condition record` for
 record-scoped evaluation only, or `--condition corpus` to search the whole
 existing index for the selected questions. Repeated evaluations need a new or
 empty `--output` directory.
+
+`run` shows a tqdm progress bar on stderr by default, counting saved evaluation
+results (12 for the three questions above). It displays the active record,
+condition, backend, and answering/scoring phase. Add `--no-progress` to hide it;
+the final JSON summary still prints to stdout.
+
+Every evaluation also generates a self-contained **`report.html`**. Open it in
+a browser for charts and searchable, side-by-side answers, gold answers/aliases,
+gold supporting paragraphs, multi-hop labels, citations, retrieved evidence,
+and the exact answer context. Record and corpus conditions remain separate.
+Download each chart as PNG or SVG for slides, or use the report's print buttons
+and your browser's **Save as PDF** for the overview, selected record, or entire
+report. All report content works offline; JavaScript must be enabled.
+
+Create the report for a past run without repeating evaluation:
+
+```sh
+uv run --locked graphrag-eval report --input runs/eval-prepared-4-to-6-part-3
+```
+
+This atomically replaces only that directory's `report.html`. Large runs produce
+larger files; printing an entire run expands all contexts and can take time.
+See the [report command reference](vectorrag_vs_graphrag_evaluation_ragas.md#report-reference)
+for partial runs, artifact validation, and optional browser tests.
 
 The [complete CLI reference](vectorrag_vs_graphrag_evaluation_ragas.md) lists
 **every option, type, default, and applicable subcommand**, with

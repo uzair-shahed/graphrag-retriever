@@ -198,10 +198,15 @@ def test_build_answer_llm_uses_existing_provider_settings() -> None:
         host="http://localhost:11434",
         llm_model="local-llm",
         embedding_model="local-embedding",
+        request_timeout_seconds=37,
+        llm_max_tokens=128,
     )
     ollama_llm = build_answer_llm(ollama)
     assert ollama_llm.model_name == "local-llm"
     assert ollama_llm.response_schema == GeneratedAnswer.model_json_schema()
+    assert ollama_llm.model_params["think"] is False
+    assert ollama_llm.model_params["options"]["num_predict"] == 128
+    assert ollama_llm.client._client.timeout.read == ollama.request_timeout_seconds
 
 
 def test_generate_answer_rejects_pregenerated_answer_that_saw_more_than_the_bound() -> None:

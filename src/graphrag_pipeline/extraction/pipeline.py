@@ -78,7 +78,7 @@ def build_simple_kg_pipeline(
             model_name=settings.llm_model,
             response_model=Neo4jGraph,
             model_params={
-                # "think": False,  # -- Does not need to always be active. Only turn on if using a hybrid model like qwen3:8b
+                "think": False,
                 "options": {"temperature": 0, "num_predict": settings.llm_max_tokens}
             },
             host=settings.host,

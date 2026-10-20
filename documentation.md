@@ -508,7 +508,7 @@ evaluation for `dataset/musique/data/data/musique_ans_v1.0_dev.jsonl`. Run from
 the repository root after `uv sync --locked --extra dev`.
 
 ```text
-graphrag-eval {prepare,check,run} [OPTIONS]
+graphrag-eval {prepare,check,run,report} [OPTIONS]
 ```
 
 The [complete evaluation CLI reference](vectorrag_vs_graphrag_evaluation_ragas.md)
@@ -522,9 +522,10 @@ workflow and how it relates to existing ingestion and query commands.
 | --- | --- | --- | --- |
 | `prepare` | Dataset file, Neo4j and the `GRAPH_RAG_PROVIDER` extraction/embedding service. | Reconcile selected paragraph chunks; reuse complete matching work and ingest missing chunks using the existing resumable loader. May write graph data and ingestion manifests. | JSON ingestion summary with chunk/record outcomes and manifest paths. |
 | `check` | Dataset file, Neo4j, configured model/index settings and selected records already ingested. | Read-only verification of selected source chunks, provenance, atomic completion and graph/index prerequisites for the chosen conditions. Calls no models and does not repair data. | JSON selection/preflight/prerequisite report; no evaluation artifact directory. |
-| `run` | The same ready graph plus answer/evaluator services and credentials. | Built-in preflight, retrieval and answering for both VectorRAG and GraphRAG, RAGAS Triad scoring and deterministic MuSiQue gold checks. Reads graph data; never ingests. | JSON summary on stdout plus `preflight.json`, `manifest.json`, `records.jsonl` and `summary.json` in the output directory. |
+| `run` | The same ready graph plus answer/evaluator services and credentials. | Built-in preflight, retrieval and answering for both VectorRAG and GraphRAG, RAGAS Triad scoring and deterministic MuSiQue gold checks. Reads graph data; never ingests. | JSON summary on stdout plus `preflight.json`, `manifest.json`, `records.jsonl`, `summary.json`, and offline `report.html` in the output directory. |
+| `report` | Saved `manifest.json` and `records.jsonl`; `summary.json` is optional. | Validate saved artifacts and atomically regenerate only `report.html`. No dataset loading, Neo4j connection, or model calls. | JSON report path, completed-row count, and warnings on stdout. |
 
-Any subcommand with `--dry-run` only validates/previews record selection and
+`prepare`, `check`, or `run` with `--dry-run` only validates/previews record selection and
 paragraph counts. It does not contact Neo4j/providers or establish runtime
 readiness. A successful `check` does not test answer or judge availability.
 
@@ -532,8 +533,10 @@ readiness. A successful `check` does not test answer or judge availability.
 
 | Available on | Options | Details |
 | --- | --- | --- |
-| All three | `--dataset-path`, `--record-id`, `--records`, `--max-records`, `--start-record`, `--dry-run`, `-h` / `--help` | [Shared option types, defaults and selection rules](vectorrag_vs_graphrag_evaluation_ragas.md#shared-options-and-selection-rules). |
-| `prepare` only | `--manifest-path`, `--no-progress` | [Preparation options](vectorrag_vs_graphrag_evaluation_ragas.md#prepare-reference). |
+| `prepare`, `check`, `run` | `--dataset-path`, `--record-id`, `--records`, `--max-records`, `--start-record`, `--dry-run`, `-h` / `--help` | [Shared option types, defaults and selection rules](vectorrag_vs_graphrag_evaluation_ragas.md#shared-options-and-selection-rules). |
+| `report` only | `--input PATH` (required), `-h` / `--help` | Saved run directory. Regenerates `PATH/report.html`; accepts no selection/provider flags. |
+| `prepare` only | `--manifest-path` | [Preparation options](vectorrag_vs_graphrag_evaluation_ragas.md#prepare-reference). |
+| `prepare` and `run` | `--no-progress` | Hide the default tqdm bar; keep the final JSON summary. Preparation counts chunks; evaluation counts saved result rows. |
 | `check` and `run` | `--condition` | `record`, `corpus`, or both by repeating the flag; defaults to both. [Readiness conditions](vectorrag_vs_graphrag_evaluation_ragas.md#check-reference). |
 | `run` only | `--output`, `--top-k`, `--max-context-chunks`, `--max-context-tokens`, `--max-graph-nodes` | Output location and retrieval/context/traversal budgets. [Defaults and behavior](vectorrag_vs_graphrag_evaluation_ragas.md#run-reference). |
 | `run` only | `--answer-provider`, `--answer-model`, `--eval-provider`, `--eval-model`, `--eval-embedding-model` | Answer and RAGAS provider/model overrides. [Configuration precedence](vectorrag_vs_graphrag_evaluation_ragas.md#provider-configuration-and-precedence). |
@@ -548,6 +551,42 @@ selection. Explicit `--start-record` also cannot accompany `--record-id`.
 With no selectors, all dev records are selected. Starting at a position without
 a count selects through EOF; a count extending beyond EOF returns the available
 records. Empty selections and invalid/duplicate/unknown IDs are errors.
+
+#### Offline visual reports and presentation exports
+
+Every started evaluation generates `report.html` after finalizing its JSON
+artifacts. To generate one for an existing run:
+
+```sh
+uv run --locked graphrag-eval report --input runs/eval-prepared-4-to-6-part-3
+```
+
+Open the resulting file directly in a browser. It embeds its data, scripts,
+styles, and charts, so it requires no server or network connection. The overview
+compares Triad scores, answer agreement, gold context/hop coverage, outcomes,
+context size, and pipeline latency excluding RAGAS judging. Counts accompany
+scores; unavailable values remain N/A. Record and corpus conditions are separate.
+
+Search by question or record ID and select a condition to compare the two
+backends. Expand gold supporting context, decomposition, citations, full retrieved
+evidence (including graph entities/relationships), or the exact bounded answer
+context. The overview always summarizes all saved rows; record search does not
+filter its charts.
+
+Use **Download PNG/SVG** on each chart for slides. Use **Print overview**, **Print
+selected record**, or **Print entire report**, followed by the browser's **Save
+as PDF**. Entire-report printing expands every record and condition and may be
+expensive for a full-dev run. Reports require JavaScript; PNG and PDF exports use
+browser capabilities, with no extra Python runtime dependency.
+
+Interrupted runs retain saved rows and receive a partial report where possible.
+Missing results, metric errors, incomplete traversals, and snapshot warnings are
+visible. A malformed complete row prevents report replacement; only an incomplete
+final JSONL line can be ignored with a warning. Charts are recomputed from complete
+rows, with a warning if an existing summary differs. Report failures preserve
+evaluation JSON and the original evaluation failure; otherwise they cause a
+nonzero exit. See the [complete report reference](vectorrag_vs_graphrag_evaluation_ragas.md#report-reference)
+for optional Chromium validation commands.
 
 #### Example: prepare records 4–6
 
@@ -632,6 +671,13 @@ There is no `--retrieval-backend` flag on `graphrag-eval`: both backends always
 run. That flag remains part of the separate `graphrag-query` command for single
 backend QA. `--answer-provider` and `--eval-provider` change those respective
 roles; they do not change retrieval embeddings or rewrite graph vectors.
+
+Ollama extraction and answer calls disable thinking with the native
+`think: false` field and honor `OLLAMA_REQUEST_TIMEOUT_SECONDS`. The Ollama RAGAS judge
+uses `reasoning_effort: "none"` on the OpenAI-compatible endpoint, with each
+metric's JSON Schema enforced in the response format. This prevents a judge
+from satisfying JSON syntax while returning input fields instead of required
+score fields such as `rating`. Model names and configured timeouts are retained.
 
 See [all use-case examples](vectorrag_vs_graphrag_evaluation_ragas.md#examples-by-use-case)
 for custom manifests, dataset paths, full-file runs and evaluator/provider

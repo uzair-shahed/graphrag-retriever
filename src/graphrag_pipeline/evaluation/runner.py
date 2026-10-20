@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
@@ -10,6 +11,8 @@ from collections import Counter
 from dataclasses import asdict
 from importlib.metadata import version
 from pathlib import Path
+
+from tqdm import tqdm
 
 from graphrag_pipeline.answer import AnswerSettings, generate_answer
 from graphrag_pipeline.answer_context import ANSWER_PROMPT_TEMPLATE, render_evidence_context
@@ -86,7 +89,8 @@ def summarize(rows):
 
 
 async def run_evaluation(cases, retriever, llm, metrics, settings, output, *,
-                         configuration=None, snapshot=None, count_tokens=None, metric_timeout=180):
+                         configuration=None, snapshot=None, count_tokens=None, metric_timeout=180,
+                         show_progress=True):
     """No ingestion dependencies: evaluating an existing graph is read-only."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -111,8 +115,12 @@ async def run_evaluation(cases, retriever, llm, metrics, settings, output, *,
     rows = []
     stopped = False
     try:
-        with (output / "records.jsonl").open("x", encoding="utf-8") as stream:
+        with (output / "records.jsonl").open("x", encoding="utf-8") as stream, tqdm(
+            total=len(cases) * len(settings.conditions) * 2,
+            desc="Evaluating", unit="result", disable=not show_progress,
+        ) as progress:
             for index, case in enumerate(cases):
+                progress.set_postfix(record=f"{index + 1}/{len(cases)}", phase="retrieving")
                 embedding_error = None
                 embedding_start = time.perf_counter()
                 try:
@@ -140,6 +148,8 @@ async def run_evaluation(cases, retriever, llm, metrics, settings, output, *,
                     for backend in ("vectorrag", "graphrag"):
                         started = time.perf_counter()
                         trace_id = f"{pair_id}:{backend}"
+                        progress.set_postfix(record=f"{index + 1}/{len(cases)}", condition=condition,
+                                             backend=backend, phase="answering")
                         request = case.query(trace_id, backend)
                         full = retrieved[backend]
                         evidence = select_context(full, settings, count_tokens)
@@ -158,6 +168,8 @@ async def run_evaluation(cases, retriever, llm, metrics, settings, output, *,
                                 capturing, answer_settings=AnswerSettings(mode, settings.max_context_chunks))
                         answer_seconds = time.perf_counter() - started
                         scoring_started = time.perf_counter()
+                        progress.set_postfix(record=f"{index + 1}/{len(cases)}", condition=condition,
+                                             backend=backend, phase="scoring")
                         scores = await triad_scores(metrics, response, evidence, timeout=metric_timeout)
                         if full == evidence:
                             retrieval_score = scores["context_relevance"]
@@ -205,6 +217,7 @@ async def run_evaluation(cases, retriever, llm, metrics, settings, output, *,
                             "answer_context_gold", "retrieval_context_relevance", "context_tokens",
                         )} | {"response": {"status": response.status}})
                         write_json(output / "summary.json", summarize(rows))
+                        progress.update(1)
     except BaseException:
         stopped = True
         raise
@@ -222,4 +235,15 @@ async def run_evaluation(cases, retriever, llm, metrics, settings, output, *,
         summary["expected_rows"] = len(cases) * len(settings.conditions) * 2
         write_json(output / "summary.json", summary)
         write_json(output / "manifest.json", manifest)
+        try:
+            from graphrag_pipeline.evaluation.report import generate_report
+            report = generate_report(output)
+            summary["report"] = report["report"]
+            summary["report_warnings"] = report["warnings"]
+        except Exception as error:
+            diagnostics = exception_diagnostics(error)
+            logging.getLogger(__name__).error("HTML report generation failed; evaluation artifacts are preserved: %s", diagnostics)
+            # An interruption or original evaluation failure must retain its cause.
+            if not stopped:
+                raise RuntimeError(f"HTML report generation failed; evaluation artifacts remain in {output}: {diagnostics}") from error
     return rows, summary

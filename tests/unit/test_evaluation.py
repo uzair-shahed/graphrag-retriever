@@ -1,6 +1,7 @@
 """Behavioral tests for selection, existing-graph evaluation and paired scoring."""
 
 import asyncio
+import io
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -236,6 +237,74 @@ def test_evaluation_refuses_to_overwrite_artifacts(case, tmp_path):
     assert (tmp_path / "manifest.json").read_text() == "user data"
 
 
+@pytest.mark.parametrize("conditions", [("record",), ("record", "corpus")])
+@pytest.mark.parametrize("record_count", [1, 3])
+def test_progress_counts_durable_results_including_failures(case, source, tmp_path, monkeypatch, conditions, record_count):
+    from tqdm import tqdm
+    bars = []
+    output = tmp_path / "run"
+
+    class ObservedProgress(tqdm):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs, file=io.StringIO())
+            bars.append(self)
+            self.completed = []
+
+        def update(self, n=1):
+            saved = (output / "records.jsonl").read_text().splitlines()
+            summary = json.loads((output / "summary.json").read_text())
+            self.completed.append(len(saved))
+            assert summary["completed_rows"] == len(saved) == len(self.completed)
+            return super().update(n)
+
+    monkeypatch.setattr("graphrag_pipeline.evaluation.runner.tqdm", ObservedProgress)
+    llm = MagicMock()
+    llm.invoke.return_value = SimpleNamespace(content=json.dumps({"answer": "Boston", "citations": [evidence(case)[1].chunk_id]}))
+    metrics = fake_metrics()
+    metrics["context_relevance"].ascore.side_effect = RuntimeError("judge failed")
+    rows, _ = asyncio.run(run_evaluation(load_cases(source, records=record_count), FakeRetriever(evidence(case), fail="graphrag"),
+        llm, metrics, EvaluationSettings(conditions=conditions), output, count_tokens=len))
+    bar = bars[0]
+    assert bar.n == bar.total == len(rows) == record_count * 2 * len(conditions)
+    assert bar.completed == list(range(1, len(rows) + 1))
+    assert bar.disable  # Context manager closed the bar.
+    assert any(row["response"]["status"] == "failed" for row in rows)
+
+
+def test_progress_uses_stderr_and_can_be_disabled(case, tmp_path, capsys):
+    run_fake(case, tmp_path / "visible")
+    visible = capsys.readouterr()
+    assert visible.out == ""
+    assert "Evaluating" in visible.err and "4/4" in visible.err
+    run_fake(case, tmp_path / "hidden", show_progress=False)
+    hidden = capsys.readouterr()
+    assert hidden.out == hidden.err == ""
+
+
+def test_progress_closes_and_preserves_partial_artifacts_on_interrupt(case, tmp_path, monkeypatch):
+    from tqdm import tqdm
+    bars = []
+
+    class ObservedProgress(tqdm):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs, file=io.StringIO())
+            bars.append(self)
+
+    class InterruptedRetriever(FakeRetriever):
+        def retrieve(self, backend, vector, record_id):
+            if record_id is None:
+                raise KeyboardInterrupt
+            return super().retrieve(backend, vector, record_id)
+
+    monkeypatch.setattr("graphrag_pipeline.evaluation.runner.tqdm", ObservedProgress)
+    with pytest.raises(KeyboardInterrupt):
+        run_fake(case, tmp_path / "run", retriever=InterruptedRetriever(evidence(case)))
+    assert bars[0].disable and bars[0].n == 2 and bars[0].total == 4
+    assert json.loads((tmp_path / "run/manifest.json").read_text())["status"] == "interrupted"
+    assert json.loads((tmp_path / "run/summary.json").read_text())["completed_rows"] == 2
+    assert len((tmp_path / "run/records.jsonl").read_text().splitlines()) == 2
+
+
 def test_missing_graph_does_not_trigger_preparation(source, monkeypatch):
     monkeypatch.setattr("graphrag_pipeline.evaluation.command.Neo4jSettings.from_env", lambda: SimpleNamespace())
     monkeypatch.setattr("graphrag_pipeline.evaluation.command.model_settings_from_env", lambda: object())
@@ -292,6 +361,10 @@ def test_real_ragas_metrics_through_mocked_provider_http(case, monkeypatch, prov
     chat = [b for url, b in requests if url.endswith("completions")]
     if provider == "openrouter":
         assert all(b["provider"]["allow_fallbacks"] is False for b in chat)
+    else:
+        assert all(b["reasoning_effort"] == "none" for b in chat)
+        assert all(b["response_format"]["type"] == "json_schema" for b in chat)
+        assert all(b["response_format"]["json_schema"]["schema"]["required"] for b in chat)
 
 
 def test_evaluator_settings_independent_and_secrets_excluded(monkeypatch):
@@ -304,7 +377,8 @@ def test_evaluator_settings_independent_and_secrets_excluded(monkeypatch):
     assert "secret" not in repr(settings) and "api_key" not in settings.public()
 
 
-def test_existing_graph_command_runs_without_invoking_ingestion(source, tmp_path, monkeypatch):
+@pytest.mark.parametrize("no_progress", [False, True])
+def test_existing_graph_command_runs_without_invoking_ingestion(source, tmp_path, monkeypatch, no_progress):
     case = load_cases(source, records=1)[0]
     import tiktoken
     monkeypatch.setattr(tiktoken, "get_encoding", lambda name: SimpleNamespace(encode=lambda text, **kw: list(text)))
@@ -322,9 +396,13 @@ def test_existing_graph_command_runs_without_invoking_ingestion(source, tmp_path
     monkeypatch.setattr("graphrag_pipeline.evaluation.command.build_metrics", lambda *a: (fake_metrics(), SimpleNamespace(close=AsyncMock())))
     prepare = AsyncMock()
     monkeypatch.setattr("graphrag_pipeline.evaluation.command.load_selected_records", prepare)
-    args = build_parser().parse_args(["run", "--dataset-path", str(source), "--records", "1", "--output", str(tmp_path / "run")])
+    runner = AsyncMock(wraps=run_evaluation)
+    monkeypatch.setattr("graphrag_pipeline.evaluation.command.run_evaluation", runner)
+    args = build_parser().parse_args(["run", "--dataset-path", str(source), "--records", "1", "--output", str(tmp_path / "run")]
+                                    + (["--no-progress"] if no_progress else []))
     code, result = asyncio.run(execute(args))
     assert code == 0 and result["completed_rows"] == 4
+    assert runner.call_args.kwargs["show_progress"] is not no_progress
     prepare.assert_not_called()
 
 
