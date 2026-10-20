@@ -544,7 +544,16 @@ def run_mvp(
             driver = managed_conn.connect()
         except Exception as e:
             logger.warning("Neo4j connection unavailable: %s. Vector and walk conditions will use fallback.", e)
-            driver = None
+    if driver is not None:
+        try:
+            from graphrag_pipeline.ingestion.record_adapter import build_context_links_for_record
+            from graphrag_pipeline.storage.question_context import link_questions_to_paragraphs
+            links = []
+            for r in records:
+                links.extend(build_context_links_for_record(json.dumps(r), 1))
+            link_questions_to_paragraphs(driver, links)
+        except Exception as e:
+            logger.warning("Could not auto-link question context: %s", e)
 
     results: list[ConditionResult] = []
 
