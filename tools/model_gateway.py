@@ -140,6 +140,9 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
     cache_dir: Path = Path("runs/cache")
     budget_usd: float = 5.0
     spent_usd: float = 0.0
+    max_new_calls: int | None = None
+    new_calls_count: int = 0
+    fake_unit_cost: float = 0.001
     upstream_base_url: str = "https://openrouter.ai/api/v1"
     request_history: list[dict[str, Any]] = []
 
@@ -161,8 +164,10 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                 {
                     "status": "healthy",
                     "mode": self.server_mode,
-                    "spent_usd": self.spent_usd,
+                    "spent_usd": round(self.spent_usd, 6),
                     "budget_usd": self.budget_usd,
+                    "max_new_calls": self.max_new_calls,
+                    "new_calls_count": self.new_calls_count,
                 },
             )
         elif self.path in ("/requests", "/v1/requests"):
@@ -170,6 +175,18 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         elif self.path in ("/requests/clear", "/v1/requests/clear"):
             self.request_history.clear()
             self._send_json(200, {"status": "cleared"})
+        elif self.path in ("/reset", "/v1/reset"):
+            self.request_history.clear()
+            type(self).spent_usd = 0.0
+            type(self).new_calls_count = 0
+            self._send_json(
+                200,
+                {
+                    "status": "reset",
+                    "spent_usd": 0.0,
+                    "new_calls_count": 0,
+                },
+            )
         else:
             self._send_json(404, {"error": "Not found"})
 
@@ -180,6 +197,33 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
             body = json.loads(raw_body or b"{}")
         except json.JSONDecodeError:
             self._send_json(400, {"error": "Invalid JSON body"})
+            return
+
+        if self.path in ("/config", "/v1/config"):
+            cls = type(self)
+            if "budget_usd" in body:
+                cls.budget_usd = float(body["budget_usd"])
+            if "max_new_calls" in body:
+                cls.max_new_calls = (
+                    int(body["max_new_calls"])
+                    if body["max_new_calls"] is not None
+                    else None
+                )
+            if "fake_unit_cost" in body:
+                cls.fake_unit_cost = float(body["fake_unit_cost"])
+            if body.get("reset_spend", False):
+                cls.spent_usd = 0.0
+                cls.new_calls_count = 0
+            self._send_json(
+                200,
+                {
+                    "status": "updated",
+                    "budget_usd": cls.budget_usd,
+                    "spent_usd": round(cls.spent_usd, 6),
+                    "max_new_calls": cls.max_new_calls,
+                    "new_calls_count": cls.new_calls_count,
+                },
+            )
             return
 
         self.request_history.append(
@@ -211,28 +255,58 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
             self._send_json(200, cached.get("response", {}))
             return
 
-        # 2. RECORD MODE
+        # Check budget and call limits for new (non-cache-hit) calls
+        is_cache_hit = False
         if self.server_mode == "record":
             cache_file = self.cache_dir / f"{req_hash}.json"
             if cache_file.exists():
+                is_cache_hit = True
+
+        if self.server_mode in ("record", "stub") and not is_cache_hit:
+            if self.spent_usd >= self.budget_usd:
+                self._send_json(
+                    402,
+                    {
+                        "error": (
+                            f"Model gateway budget exceeded: spent "
+                            f"${self.spent_usd:.4f} >= ${self.budget_usd:.4f}"
+                        ),
+                        "budget_usd": self.budget_usd,
+                        "spent_usd": round(self.spent_usd, 6),
+                    },
+                )
+                return
+            if (
+                self.max_new_calls is not None
+                and self.new_calls_count >= self.max_new_calls
+            ):
+                self._send_json(
+                    402,
+                    {
+                        "error": (
+                            f"Model gateway call limit exceeded: "
+                            f"{self.new_calls_count} >= {self.max_new_calls}"
+                        ),
+                        "max_new_calls": self.max_new_calls,
+                        "new_calls_count": self.new_calls_count,
+                    },
+                )
+                return
+
+        # 2. RECORD MODE
+        if self.server_mode == "record":
+            if is_cache_hit:
                 with open(cache_file, encoding="utf-8") as f:
                     cached = json.load(f)
                 self._send_json(200, cached.get("response", {}))
                 return
 
-            if self.spent_usd >= self.budget_usd:
-                self._send_json(
-                    402,
-                    {
-                        "error": "Model gateway budget exceeded.",
-                        "budget_usd": self.budget_usd,
-                        "spent_usd": self.spent_usd,
-                    },
-                )
-                return
-
             # Forward to upstream
-            upstream_url = self.upstream_base_url.rstrip("/") + ("/" + self.path.lstrip("/").replace("v1/", "", 1) if self.upstream_base_url.endswith("/v1") else "/" + self.path.lstrip("/"))
+            upstream_url = self.upstream_base_url.rstrip("/") + (
+                "/" + self.path.lstrip("/").replace("v1/", "", 1)
+                if self.upstream_base_url.endswith("/v1")
+                else "/" + self.path.lstrip("/")
+            )
             req = urllib.request.Request(
                 upstream_url,
                 data=raw_body,
@@ -247,16 +321,20 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                     resp_data = resp.read()
                     status = resp.status
             except urllib.error.HTTPError as e:
-                self._send_json(e.code, {"error": "Upstream error", "details": e.read().decode("utf-8")})
+                self._send_json(
+                    e.code,
+                    {"error": "Upstream error", "details": e.read().decode("utf-8")},
+                )
                 return
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 self._send_json(502, {"error": f"Gateway connection error: {e}"})
                 return
 
             resp_json = json.loads(resp_data.decode("utf-8"))
             # Track cost if returned by OpenRouter
             call_cost = float(resp_json.get("usage", {}).get("cost", 0.0))
-            self.spent_usd += call_cost
+            type(self).spent_usd += call_cost
+            type(self).new_calls_count += 1
 
             # Write cache
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -279,6 +357,9 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
 
         # 3. STUB MODE (Default)
         if self.path.endswith("/embeddings"):
+            call_cost = self.fake_unit_cost * 0.1
+            type(self).new_calls_count += 1
+            type(self).spent_usd += call_cost
             inputs = body.get("input", [])
             inputs = inputs if isinstance(inputs, list) else [inputs]
             data = [
@@ -291,7 +372,7 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                     "object": "list",
                     "data": data,
                     "model": body.get("model", "openai/text-embedding-3-small"),
-                    "usage": {"prompt_tokens": 10, "total_tokens": 10},
+                    "usage": {"prompt_tokens": 10, "total_tokens": 10, "cost": call_cost},
                 },
             )
             return
@@ -311,6 +392,10 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         else:
             content = stub_answer_response(prompt)
 
+        call_cost = self.fake_unit_cost
+        type(self).new_calls_count += 1
+        type(self).spent_usd += call_cost
+
         self._send_json(
             200,
             {
@@ -329,6 +414,7 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                     "prompt_tokens": len(prompt) // 4,
                     "completion_tokens": len(content) // 4,
                     "total_tokens": (len(prompt) + len(content)) // 4,
+                    "cost": call_cost,
                 },
             },
         )
@@ -340,12 +426,16 @@ def run_gateway(
     mode: str = "stub",
     cache_dir: str = "runs/cache",
     budget_usd: float = 5.0,
+    max_new_calls: int | None = None,
+    fake_unit_cost: float = 0.001,
     upstream_base_url: str = "https://openrouter.ai/api/v1",
 ) -> None:
     """Start the model gateway HTTP server."""
     ModelGatewayHandler.server_mode = mode
     ModelGatewayHandler.cache_dir = Path(cache_dir)
     ModelGatewayHandler.budget_usd = budget_usd
+    ModelGatewayHandler.max_new_calls = max_new_calls
+    ModelGatewayHandler.fake_unit_cost = fake_unit_cost
     ModelGatewayHandler.upstream_base_url = upstream_base_url
 
     server = ThreadingHTTPServer((host, port), ModelGatewayHandler)
@@ -362,6 +452,8 @@ def main() -> None:
     parser.add_argument("--mode", choices=["stub", "record", "replay"], default="stub")
     parser.add_argument("--cache-dir", default="runs/cache", help="Cache directory")
     parser.add_argument("--budget-usd", type=float, default=5.0, help="Budget ceiling in USD")
+    parser.add_argument("--max-new-calls", type=int, default=None, help="Maximum new (uncached) calls")
+    parser.add_argument("--fake-unit-cost", type=float, default=0.001, help="Cost per stub call in USD")
     parser.add_argument("--upstream-base-url", default="https://openrouter.ai/api/v1")
     args = parser.parse_args()
 
@@ -371,6 +463,8 @@ def main() -> None:
         mode=args.mode,
         cache_dir=args.cache_dir,
         budget_usd=args.budget_usd,
+        max_new_calls=args.max_new_calls,
+        fake_unit_cost=args.fake_unit_cost,
         upstream_base_url=args.upstream_base_url,
     )
 
