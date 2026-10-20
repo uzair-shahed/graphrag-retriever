@@ -172,6 +172,8 @@ class QueryResponse(BaseModel):
                 raise ValueError("successful responses require a non-empty answer")
             if not self.citations:
                 raise ValueError("successful responses require citations")
+        if self.status == "insufficient_evidence" and (self.answer is not None or self.citations):
+            raise ValueError("insufficient evidence responses cannot contain answers or citations")
         return self
 
 

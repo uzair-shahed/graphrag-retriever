@@ -134,7 +134,7 @@ With `--retrieval-backend graphrag`, the application builds a Neo4j
 performs retrieval, assembles the retrieved text into its own context, and
 calls the GraphRAG-compatible LLM to generate an answer. The application
 receives both the generated answer and the retriever context, then normalizes
-that context into `EvidenceChunk` values and uses the returned chunk IDs as
+that context into `EvidenceChunk` values and validates the model's declared
 citations. The application does not make a second answer-model call.
 
 In this project, GraphRAG begins with vector similarity over `Chunk` nodes.
@@ -146,9 +146,8 @@ relationships that could leave the seed subgraph. `--max-graph-nodes` is a
 resource budget; evidence is marked incomplete if that budget prevents
 returning the full component. This is a per-seed-chunk entity subgraph, not a
 traversal that merges separate paragraph components across a whole MuSiQue
-record. The graph nodes and relationships are preserved in evidence, while
-Neo4j's managed answer prompt sees the retrieved chunk text rather than those
-structured graph fields.
+record. The shared evidence renderer includes chunk text and graph entity and
+relationship lines in the managed answer prompt and retained evidence.
 
 #### VectorRAG path
 
@@ -190,16 +189,22 @@ prompt contains only the question and returned evidence, with each chunk's
 `chunk_id` exposed as a citation candidate; MuSiQue gold answers, supporting
 fact labels, and decomposition fields are never sent to the provider.
 
-For VectorRAG, the provider must return JSON with exactly `answer` and
-`citations` fields. For GraphRAG, `GraphRAG.search()` supplies the answer and
-the adapter cites the returned context chunk IDs because the 1.21.0 result
-model does not expose generated citations. Empty retrieval produces
-`insufficient_evidence` without an LLM call. Provider exceptions, malformed
+Both backends request JSON containing `status`, `answer`, and `citations`.
+An `answered` result requires a nonempty answer and citations; an
+`insufficient_evidence` result requires a null answer and empty citations,
+and preserves the retrieved evidence. Older successful two-field output is
+accepted for compatibility. GraphRAG's managed answer uses the same parser and
+citation validator. Empty retrieval produces `insufficient_evidence` without
+an LLM call. Provider exceptions, malformed
 JSON, empty answers, missing citations, and citations for unknown chunks
 produce `failed`; a `succeeded` `QueryResponse` always has a non-empty answer
 and citations while preserving request, backend, and evidence provenance.
 
 ### MuSiQue correctness verification
+
+The paired `graphrag-eval prepare/check/run` workflow, independent RAGAS provider
+configuration, compatible range selectors and report interpretation are described
+in [the RAGAS evaluation guide](vectorrag_vs_graphrag_evaluation_ragas.md).
 
 The MuSiQue-specific checks are in `src/graphrag_pipeline/musique_verification.py`.
 They run after retrieval and answer generation and keep evaluation labels out
@@ -495,3 +500,140 @@ the chunk-level counts and failures.
 The hidden `--skip-prerequisite-check` option is intended only for internal
 testing and is deliberately omitted from the public flag list. Normal runs
 should leave prerequisite checks enabled.
+
+### Paired VectorRAG/GraphRAG evaluation command reference
+
+`graphrag-eval` provides preparation, readiness checking and paired RAGAS
+evaluation for `dataset/musique/data/data/musique_ans_v1.0_dev.jsonl`. Run from
+the repository root after `uv sync --locked --extra dev`.
+
+```text
+graphrag-eval {prepare,check,run} [OPTIONS]
+```
+
+The [complete evaluation CLI reference](vectorrag_vs_graphrag_evaluation_ragas.md)
+is the detailed specification of option types/defaults, provider precedence,
+scoring, output files and exit codes. This section explains the operational
+workflow and how it relates to existing ingestion and query commands.
+
+#### Subcommand behavior
+
+| Subcommand | Required state | Operation | Output |
+| --- | --- | --- | --- |
+| `prepare` | Dataset file, Neo4j and the `GRAPH_RAG_PROVIDER` extraction/embedding service. | Reconcile selected paragraph chunks; reuse complete matching work and ingest missing chunks using the existing resumable loader. May write graph data and ingestion manifests. | JSON ingestion summary with chunk/record outcomes and manifest paths. |
+| `check` | Dataset file, Neo4j, configured model/index settings and selected records already ingested. | Read-only verification of selected source chunks, provenance, atomic completion and graph/index prerequisites for the chosen conditions. Calls no models and does not repair data. | JSON selection/preflight/prerequisite report; no evaluation artifact directory. |
+| `run` | The same ready graph plus answer/evaluator services and credentials. | Built-in preflight, retrieval and answering for both VectorRAG and GraphRAG, RAGAS Triad scoring and deterministic MuSiQue gold checks. Reads graph data; never ingests. | JSON summary on stdout plus `preflight.json`, `manifest.json`, `records.jsonl` and `summary.json` in the output directory. |
+
+Any subcommand with `--dry-run` only validates/previews record selection and
+paragraph counts. It does not contact Neo4j/providers or establish runtime
+readiness. A successful `check` does not test answer or judge availability.
+
+#### Complete option inventory
+
+| Available on | Options | Details |
+| --- | --- | --- |
+| All three | `--dataset-path`, `--record-id`, `--records`, `--max-records`, `--start-record`, `--dry-run`, `-h` / `--help` | [Shared option types, defaults and selection rules](vectorrag_vs_graphrag_evaluation_ragas.md#shared-options-and-selection-rules). |
+| `prepare` only | `--manifest-path`, `--no-progress` | [Preparation options](vectorrag_vs_graphrag_evaluation_ragas.md#prepare-reference). |
+| `check` and `run` | `--condition` | `record`, `corpus`, or both by repeating the flag; defaults to both. [Readiness conditions](vectorrag_vs_graphrag_evaluation_ragas.md#check-reference). |
+| `run` only | `--output`, `--top-k`, `--max-context-chunks`, `--max-context-tokens`, `--max-graph-nodes` | Output location and retrieval/context/traversal budgets. [Defaults and behavior](vectorrag_vs_graphrag_evaluation_ragas.md#run-reference). |
+| `run` only | `--answer-provider`, `--answer-model`, `--eval-provider`, `--eval-model`, `--eval-embedding-model` | Answer and RAGAS provider/model overrides. [Configuration precedence](vectorrag_vs_graphrag_evaluation_ragas.md#provider-configuration-and-precedence). |
+
+The default dataset is fixed to the answerable dev file; `--dataset-path` can
+relocate that file while retaining its filename. It does not read
+`GRAPH_RAG_DATASET_PATHS`. `--start-record S --records N` uses exactly the
+loader's nonblank-record counting convention: 1-indexed and inclusive of S.
+`--max-records` aliases `--records`; neither can be combined with exact ID
+selection. Explicit `--start-record` also cannot accompany `--record-id`.
+
+With no selectors, all dev records are selected. Starting at a position without
+a count selects through EOF; a count extending beyond EOF returns the available
+records. Empty selections and invalid/duplicate/unknown IDs are errors.
+
+#### Example: prepare records 4–6
+
+```sh
+uv run --locked graphrag-eval prepare --start-record 4 --records 3 --dry-run
+uv run --locked graphrag-eval prepare --start-record 4 --records 3
+```
+
+The first command previews the selected records and chunk count. The second
+prepares their paragraphs using `GRAPH_RAG_PROVIDER` and the existing checkpoint
+mechanism. Repeat the second command to resume/reconcile work. This does not
+create the vector index; use the established index setup workflow separately.
+
+Unlike the standalone ingestion loader, the evaluation preparation wrapper
+defaults to the `ans` dev file and permits arbitrary IDs as well as ranges.
+It accepts the listed evaluation options, not all flags from the standalone
+ingestion command. Conflicting or legacy source identities require inspection.
+
+#### Example: check an existing subset
+
+```sh
+uv run --locked graphrag-eval check --start-record 4 --records 3 --condition record
+```
+
+Verifies records 4, 5 and 6 for record-scoped retrieval, including index-supported
+`record_id` filtering. A ready report includes `preflight.ready: true`. Missing
+or conflicting chunks produce a report and nonzero exit; they do not trigger
+ingestion. Match the condition flags between `check` and the subsequent `run`.
+
+#### Example: run evaluation on existing records
+
+```sh
+uv run --locked graphrag-eval run --start-record 4 --records 3 --condition record --answer-provider ollama --eval-provider ollama --output runs/eval-record-4-to-6
+```
+
+Generates fresh Ollama answers and RAGAS scores for both backends on these three
+questions, producing six rows under the record condition. Only these records
+need to be loaded. Retrieval embeddings still follow `GRAPH_RAG_PROVIDER` and
+must match the stored vectors. Each repeated run needs a new or empty output
+directory. `run` always performs preflight even if `check` was run earlier.
+
+#### Example: select exact records or a first-N subset
+
+```sh
+uv run --locked graphrag-eval run --record-id 2hop__460946_294723 --record-id 2hop__259228_793698 --condition record --output runs/eval-exact-ids
+uv run --locked graphrag-eval run --max-records 10 --condition record --output runs/eval-first-ten
+```
+
+The first command evaluates exactly the two IDs in the supplied order. The
+second evaluates the first ten file records; it is equivalent to
+`--records 10`. These are separate alternatives, not selectors to combine.
+
+#### Example: compare both retrieval conditions
+
+```sh
+uv run --locked graphrag-eval check --records 10 --condition record --condition corpus
+uv run --locked graphrag-eval run --records 10 --condition record --condition corpus --output runs/eval-both-conditions
+```
+
+Evaluates ten questions with two backends under two conditions, producing 40
+rows. Omitting both condition flags has the same effect. `record` filters
+retrieval to each question's record; `corpus` searches the entire existing
+graph/index, including records outside the selected question subset.
+`--condition corpus` alone selects corpus-only evaluation.
+
+#### Example: tune budgets or use different providers
+
+```sh
+uv run --locked graphrag-eval run --records 5 --top-k 8 --max-context-chunks 4 --max-context-tokens 2048 --max-graph-nodes 300 --output runs/eval-small-context
+uv run --locked graphrag-eval run --records 1 --answer-provider openrouter --answer-model openai/gpt-4o-mini --eval-provider ollama --eval-model qwen3:4b-instruct --eval-embedding-model nomic-embed-text --output runs/eval-mixed-providers
+```
+
+The first command retrieves eight seeds per backend and keeps a ranked prefix
+of up to four whole evidence blocks within a 2,048 `cl100k_base` proxy-token
+context budget; graph traversal uses a 300-node per-seed resource budget.
+The second uses OpenRouter for both backends' answers and Ollama for RAGAS.
+Its model names are examples and require matching configured services and
+credentials. It makes OpenRouter calls when executed; it was not executed as
+part of the documentation update.
+
+There is no `--retrieval-backend` flag on `graphrag-eval`: both backends always
+run. That flag remains part of the separate `graphrag-query` command for single
+backend QA. `--answer-provider` and `--eval-provider` change those respective
+roles; they do not change retrieval embeddings or rewrite graph vectors.
+
+See [all use-case examples](vectorrag_vs_graphrag_evaluation_ragas.md#examples-by-use-case)
+for custom manifests, dataset paths, full-file runs and evaluator/provider
+combinations, and [exit codes and recovery](vectorrag_vs_graphrag_evaluation_ragas.md#exit-codes-and-recovery)
+for interpreting command outcomes.

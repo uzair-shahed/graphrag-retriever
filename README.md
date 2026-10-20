@@ -3,6 +3,60 @@
 A Python application that extracts a knowledge graph into Neo4j and answers
 questions using Neo4j-backed retrieval and an OpenRouter or Ollama model.
 
+## VectorRAG vs. GraphRAG evaluation
+
+`graphrag-eval` evaluates the MuSiQue answerable dev file with RAGAS Triad
+scores and gold answer/support/hop metrics. Every `run` compares both VectorRAG
+and GraphRAG. The supported source is
+`dataset/musique/data/data/musique_ans_v1.0_dev.jsonl`.
+
+| Command | What it does | Example selecting records 4–6 |
+| --- | --- | --- |
+| `prepare` | Ingest missing selected records and reuse verified chunks; may write Neo4j and call extraction/embedding models. | `graphrag-eval prepare --start-record 4 --records 3` |
+| `check` | Read-only verification of selected records and graph/index prerequisites; makes no model calls. | `graphrag-eval check --start-record 4 --records 3` |
+| `run` | Check readiness, generate paired answers and RAGAS/gold scores, and write evaluation artifacts. Never ingests data. | `graphrag-eval run --start-record 4 --records 3 --output runs/evaluation-4-to-6` |
+
+Run the commands from the repository root using the locked environment. Start
+with a selection preview, which needs neither Neo4j nor model services:
+
+```sh
+uv run --locked graphrag-eval prepare --start-record 4 --records 3 --dry-run
+```
+
+This prints the selected IDs/source lines and planned paragraph count. It does
+not establish that the graph or providers are ready. If records 4–6 are already
+ingested, evaluate them directly:
+
+```sh
+uv run --locked graphrag-eval check --start-record 4 --records 3
+uv run --locked graphrag-eval run --start-record 4 --records 3 --answer-provider ollama --eval-provider ollama --output runs/evaluation-4-to-6
+```
+
+The run uses Ollama for answers and judging. Its default conditions are both
+record-scoped and corpus-wide, producing 12 rows for these three questions.
+Retrieval embeddings retain the configured `GRAPH_RAG_PROVIDER`; their model
+must match the graph/index. If the check reports missing records, prepare that
+same range explicitly, then repeat the check and run:
+
+```sh
+uv run --locked graphrag-eval prepare --start-record 4 --records 3
+```
+
+No selectors means the entire dev file. `--records 10` selects the first ten
+records; `--max-records 10` is equivalent. Repeated `--record-id` selects exact
+IDs and cannot be mixed with range flags. Use `--condition record` for
+record-scoped evaluation only, or `--condition corpus` to search the whole
+existing index for the selected questions. Repeated evaluations need a new or
+empty `--output` directory.
+
+The [complete CLI reference](vectorrag_vs_graphrag_evaluation_ragas.md) lists
+**every option, type, default, and applicable subcommand**, with
+[use-case examples](vectorrag_vs_graphrag_evaluation_ragas.md#examples-by-use-case),
+[provider precedence](vectorrag_vs_graphrag_evaluation_ragas.md#provider-configuration-and-precedence),
+and [exit codes](vectorrag_vs_graphrag_evaluation_ragas.md#exit-codes-and-recovery).
+Use `uv run --locked graphrag-eval run --help` for command-line help or see the
+[operational evaluation reference](documentation.md#paired-vectorraggraphrag-evaluation-command-reference).
+
 ## Windows Quick Start
 
 The initial Windows target is Windows 11 x64 with PowerShell and Python 3.14.3.

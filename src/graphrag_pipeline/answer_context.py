@@ -17,8 +17,7 @@ Caveats:
     The template must not contain literal braces because it is formatted with
     ``str.format``. Rendering lists graph entities and relationships by display
     name only; it never includes MuSiQue gold answers or supporting labels.
-    The contract has no field for the model to declare "insufficient
-    evidence"; that status is assigned only when retrieval returns nothing.
+    The model may declare insufficient evidence even when chunks were found.
 """
 
 from __future__ import annotations
@@ -32,11 +31,14 @@ ANSWER_SYSTEM_INSTRUCTIONS = (
 
 ANSWER_PROMPT_TEMPLATE = (
     "Answer the question using only the graph evidence below. "
-    "Return valid JSON with exactly two fields: answer (string) and "
-    "citations (array of chunk_id strings). Every citation must be a chunk_id "
+    "Return valid JSON with exactly three fields: status (answered or "
+    "insufficient_evidence), answer (string or null), and "
+    "citations (array of chunk_id strings). For answered status, give a non-empty "
+    "answer and at least one citation. Every citation must be a chunk_id "
     "shown in square brackets in the evidence and must identify evidence "
     "actually used in the answer; do not cite chunks that were not used. "
-    "If the evidence does not support an answer, do not guess.\n\n"
+    "If the evidence does not support an answer, return status insufficient_evidence, "
+    "answer null, and citations an empty array. Do not guess.\n\n"
     "Question: {query_text}\n\n"
     "Graph evidence:\n{context}"
 )

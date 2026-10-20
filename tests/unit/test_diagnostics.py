@@ -62,3 +62,9 @@ def test_save_invalid_llm_response_ignores_non_validation_failure(tmp_path) -> N
 
     assert path is None
     assert not (tmp_path / "debugging_logs").exists()
+
+
+def test_bare_openrouter_token_is_fully_redacted():
+    token = "sk-or-v1-abcd1234-secret"
+    assert token not in str(exception_diagnostics(RuntimeError(f"rejected {token}")))
+    assert "abcd1234" not in str(exception_diagnostics(RuntimeError(f"rejected {token}")))
