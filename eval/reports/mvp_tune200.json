@@ -1,0 +1,154 @@
+{
+  "slice": "ans_dev_mvp_v1",
+  "split": "tune",
+  "results": [
+    {
+      "condition": "bm25",
+      "num_questions": 200,
+      "answer_f1": 0.116,
+      "answer_f1_ci": [
+        0.116,
+        0.116
+      ],
+      "answer_em": 0.0,
+      "answer_em_ci": [
+        0.0,
+        0.0
+      ],
+      "support_f1": 0.379,
+      "support_f1_ci": [
+        0.379,
+        0.379
+      ],
+      "r_at_2": 0.335,
+      "r_at_2_ci": [
+        0.293,
+        0.375
+      ],
+      "r_at_5": 0.493,
+      "r_at_5_ci": [
+        0.455,
+        0.534
+      ],
+      "later_hop_r_at_5": 0.375,
+      "later_hop_r_at_5_ci": [
+        0.321,
+        0.43
+      ],
+      "mean_latency_seconds": 1.384,
+      "mean_cost_usd": 0.001,
+      "predictions_path": "runs/mvp_openrouter_tune200/predictions_bm25.jsonl"
+    },
+    {
+      "condition": "vector",
+      "num_questions": 200,
+      "answer_f1": 0.151,
+      "answer_f1_ci": [
+        0.151,
+        0.151
+      ],
+      "answer_em": 0.0,
+      "answer_em_ci": [
+        0.0,
+        0.0
+      ],
+      "support_f1": 0.534,
+      "support_f1_ci": [
+        0.534,
+        0.534
+      ],
+      "r_at_2": 0.457,
+      "r_at_2_ci": [
+        0.417,
+        0.497
+      ],
+      "r_at_5": 0.698,
+      "r_at_5_ci": [
+        0.662,
+        0.735
+      ],
+      "later_hop_r_at_5": 0.652,
+      "later_hop_r_at_5_ci": [
+        0.603,
+        0.711
+      ],
+      "mean_latency_seconds": 2.202,
+      "mean_cost_usd": 0.001,
+      "predictions_path": "runs/mvp_openrouter_tune200/predictions_vector.jsonl"
+    },
+    {
+      "condition": "walk_off",
+      "num_questions": 200,
+      "answer_f1": 0.151,
+      "answer_f1_ci": [
+        0.151,
+        0.151
+      ],
+      "answer_em": 0.0,
+      "answer_em_ci": [
+        0.0,
+        0.0
+      ],
+      "support_f1": 0.534,
+      "support_f1_ci": [
+        0.534,
+        0.534
+      ],
+      "r_at_2": 0.457,
+      "r_at_2_ci": [
+        0.417,
+        0.497
+      ],
+      "r_at_5": 0.698,
+      "r_at_5_ci": [
+        0.662,
+        0.735
+      ],
+      "later_hop_r_at_5": 0.652,
+      "later_hop_r_at_5_ci": [
+        0.603,
+        0.711
+      ],
+      "mean_latency_seconds": 0.004,
+      "mean_cost_usd": 0.001,
+      "predictions_path": "runs/mvp_openrouter_tune200/predictions_walk_off.jsonl"
+    },
+    {
+      "condition": "walk_exact",
+      "num_questions": 200,
+      "answer_f1": 0.164,
+      "answer_f1_ci": [
+        0.164,
+        0.164
+      ],
+      "answer_em": 0.005,
+      "answer_em_ci": [
+        0.005,
+        0.005
+      ],
+      "support_f1": 0.528,
+      "support_f1_ci": [
+        0.528,
+        0.528
+      ],
+      "r_at_2": 0.457,
+      "r_at_2_ci": [
+        0.417,
+        0.497
+      ],
+      "r_at_5": 0.726,
+      "r_at_5_ci": [
+        0.684,
+        0.767
+      ],
+      "later_hop_r_at_5": 0.694,
+      "later_hop_r_at_5_ci": [
+        0.637,
+        0.749
+      ],
+      "mean_latency_seconds": 1.371,
+      "mean_cost_usd": 0.001,
+      "predictions_path": "runs/mvp_openrouter_tune200/predictions_walk_exact.jsonl"
+    }
+  ]
+}
