@@ -94,3 +94,38 @@ def test_run_mvp_end_to_end_stub_renders_four_rows(tmp_path: Path) -> None:
     assert json_report.exists()
     report_data = json.loads(json_report.read_text(encoding="utf-8"))
     assert len(report_data["results"]) == 4
+
+
+def test_classify_failure_categories() -> None:
+    """Error diagnosis categorizes failures into answer error, walk miss, and extraction miss."""
+    from eval.run_mvp import classify_failure
+    from graphrag_pipeline.query import EvidenceChunk
+
+    record = {
+        "id": "q1",
+        "question_decomposition": [
+            {"paragraph_support_idx": 0},
+            {"paragraph_support_idx": 1},
+        ],
+    }
+
+    # Case 1: Gold indices {0, 1} are both retrieved -> answer_error
+    retrieved_all = [
+        EvidenceChunk(chunk_id="c0", text="t0", paragraph_idx=0),
+        EvidenceChunk(chunk_id="c1", text="t1", paragraph_idx=1),
+    ]
+    assert classify_failure(record, retrieved_all, {"predicted_answer": "wrong"}) == "answer_error"
+
+    # Case 2: Only 1 gold index retrieved -> walk_miss
+    retrieved_partial = [
+        EvidenceChunk(chunk_id="c0", text="t0", paragraph_idx=0),
+        EvidenceChunk(chunk_id="c9", text="t9", paragraph_idx=9),
+    ]
+    assert classify_failure(record, retrieved_partial, {"predicted_answer": "wrong"}) == "walk_miss"
+
+    # Case 3: Zero gold indices retrieved -> extraction_miss
+    retrieved_none = [
+        EvidenceChunk(chunk_id="c8", text="t8", paragraph_idx=8),
+        EvidenceChunk(chunk_id="c9", text="t9", paragraph_idx=9),
+    ]
+    assert classify_failure(record, retrieved_none, {"predicted_answer": "wrong"}) == "extraction_miss"

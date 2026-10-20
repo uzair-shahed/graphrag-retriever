@@ -58,6 +58,58 @@ def compute_paragraph_hash(title: str, text: str) -> str:
     return hashlib.sha256(content).hexdigest()[:16]
 
 
+def classify_failure(
+    record: dict[str, Any],
+    retrieved_chunks: list[EvidenceChunk],
+    prediction: dict[str, Any],
+    driver: Any = None,
+) -> str:
+    """Categorize failure into extraction miss, link miss, walk miss, or answer error.
+
+    Rules:
+    - answer_error: Gold supporting paragraphs were retrieved in the evidence set,
+      but the model answered incorrectly or failed to cite them.
+    - extraction_miss: Gold paragraphs contain no extracted entities in the graph.
+    - link_miss: Entities were extracted from gold paragraphs, but no SAME_AS cluster links connect them.
+    - walk_miss: Bridging entity clusters exist, but traversal did not reach the target paragraph.
+    """
+    gold_indices = set(get_hop_supporting_indices(record))
+    retrieved_indices = {c.paragraph_idx for c in retrieved_chunks if c.paragraph_idx is not None}
+
+    # If all gold paragraphs were retrieved, retrieval did its job; failure is answer generation
+    if gold_indices and gold_indices.issubset(retrieved_indices):
+        return "answer_error"
+
+    if driver is None:
+        return "walk_miss" if (gold_indices & retrieved_indices) else "extraction_miss"
+
+    qid = record.get("id")
+    try:
+        res, _, _ = driver.execute_query(
+            """
+            MATCH (q:Question {id: $qid})-[ic:IN_CONTEXT]->(d:Document)<-[:FROM_DOCUMENT]-(c:Chunk)
+            WHERE ic.idx IN $gold_idxs
+            OPTIONAL MATCH (e:__Entity__)-[:FROM_CHUNK]->(c)
+            OPTIONAL MATCH (e)-[:SAME_AS]->(cluster:EntityCluster)<-[:SAME_AS]-(other:__Entity__)-[:FROM_CHUNK]->(c2:Chunk)
+            RETURN count(DISTINCT e) AS entity_count, count(DISTINCT cluster) AS cluster_count
+            """,
+            qid=qid,
+            gold_idxs=list(gold_indices),
+        )
+        if res:
+            e_count = res[0]["entity_count"]
+            c_count = res[0]["cluster_count"]
+            if e_count == 0:
+                return "extraction_miss"
+            if c_count == 0:
+                return "link_miss"
+            return "walk_miss"
+    except Exception:
+        pass
+
+    return "walk_miss" if (gold_indices & retrieved_indices) else "extraction_miss"
+
+
 def bootstrap_ci(
     values: list[float],
     n_bootstrap: int = 1000,
