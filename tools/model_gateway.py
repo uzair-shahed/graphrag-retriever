@@ -141,6 +141,7 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
     budget_usd: float = 5.0
     spent_usd: float = 0.0
     upstream_base_url: str = "https://openrouter.ai/api/v1"
+    request_history: list[dict[str, Any]] = []
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass  # Silence default HTTP server console logging
@@ -164,6 +165,11 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                     "budget_usd": self.budget_usd,
                 },
             )
+        elif self.path in ("/requests", "/v1/requests"):
+            self._send_json(200, {"requests": self.request_history})
+        elif self.path in ("/requests/clear", "/v1/requests/clear"):
+            self.request_history.clear()
+            self._send_json(200, {"status": "cleared"})
         else:
             self._send_json(404, {"error": "Not found"})
 
@@ -175,6 +181,15 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_json(400, {"error": "Invalid JSON body"})
             return
+
+        self.request_history.append(
+            {
+                "path": self.path,
+                "body": body,
+                "headers": dict(self.headers),
+                "timestamp": time.time(),
+            }
+        )
 
         req_hash = canonical_request_hash(body)
 
@@ -287,7 +302,9 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         if isinstance(fmt, dict):
             fmt_name = (fmt.get("json_schema") or {}).get("name", "")
 
-        if fmt_name == "GraphSchemaExtractionOutput":
+        if self.headers.get("X-Test-Malformed") == "true" or "[FORCE_MALFORMED_JSON]" in prompt:
+            content = "This is malformed, not valid JSON output {answer: missing_quotes}"
+        elif fmt_name == "GraphSchemaExtractionOutput":
             content = json.dumps(stub_schema_response())
         elif fmt_name == "Neo4jGraph":
             content = json.dumps(stub_graph_response(extract_input_text(prompt)))

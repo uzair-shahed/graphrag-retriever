@@ -21,18 +21,29 @@ Caveats:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 from neo4j_graphrag.llm import OllamaLLM, OpenAILLM
 
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
+from graphrag_pipeline.diagnostics import save_invalid_llm_response
 from graphrag_pipeline.query import QueryResponse, QueryRequest
 from graphrag_pipeline.retrieval import RetrievalResult
 
 
 class AnswerGenerationError(RuntimeError):
     """Raised when the answer provider returns an unusable response."""
+
+
+class AnswerWire(BaseModel):
+    """Minimal strict-schema wire model for OpenAI/OpenRouter structured outputs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str
+    citations: list[str]
 
 
 class GeneratedAnswer(BaseModel):
@@ -42,6 +53,15 @@ class GeneratedAnswer(BaseModel):
 
     answer: StrictStr = Field(min_length=1)
     citations: list[StrictStr] = Field(min_length=1)
+
+
+SYSTEM_ANSWER_INSTRUCTION = (
+    "Answer the question using only the graph evidence below. "
+    "Return valid JSON with exactly two fields: answer (string) and "
+    "citations (array of chunk_id strings). Every citation must identify "
+    "evidence used in the answer. If the evidence does not support an "
+    "answer, do not guess."
+)
 
 
 @dataclass(frozen=True)
@@ -93,17 +113,12 @@ def build_answer_llm(
 
 
 def _prompt(request: QueryRequest, retrieval: RetrievalResult, limit: int) -> str:
-    """Build a provider prompt containing only the question and graph evidence."""
+    """Build a user prompt containing only the question and graph evidence."""
     evidence = retrieval.evidence[:limit]
     context = "\n\n".join(
         f"[{item.chunk_id}] {item.text}" for item in evidence
     )
     return (
-        "Answer the question using only the graph evidence below. "
-        "Return valid JSON with exactly two fields: answer (string) and "
-        "citations (array of chunk_id strings). Every citation must identify "
-        "evidence used in the answer. If the evidence does not support an "
-        "answer, do not guess.\n\n"
         f"Question: {request.question}\n\n"
         f"Graph evidence:\n{context}"
     )
@@ -122,7 +137,11 @@ def _response_metadata(request: QueryRequest) -> dict[str, Any]:
     }
 
 
-def _parse_provider_output(raw_response: Any) -> GeneratedAnswer:
+def _parse_provider_output(
+    raw_response: Any,
+    *,
+    diagnostics_dir: Path = Path("debugging_logs"),
+) -> GeneratedAnswer:
     """Parse provider content and normalize malformed JSON as an application error."""
     content = getattr(raw_response, "content", raw_response)
     if not isinstance(content, str) or not content.strip():
@@ -130,6 +149,7 @@ def _parse_provider_output(raw_response: Any) -> GeneratedAnswer:
     try:
         return GeneratedAnswer.model_validate_json(content)
     except (ValidationError, ValueError) as error:
+        save_invalid_llm_response(error, content, directory=diagnostics_dir)
         raise AnswerGenerationError("answer provider returned malformed JSON output") from error
 
 
@@ -139,6 +159,7 @@ def generate_answer(
     llm: Any,
     *,
     answer_settings: AnswerSettings | None = None,
+    diagnostics_dir: Path = Path("debugging_logs"),
 ) -> QueryResponse:
     """Generate a grounded answer or explicit insufficient-evidence result.
 
@@ -147,6 +168,7 @@ def generate_answer(
         retrieval: Graph-backed evidence returned by the retrieval adapter.
         llm: Configured GraphRAG LLM wrapper with synchronous ``invoke``.
         answer_settings: Retrieval mode and evidence bound for the response.
+        diagnostics_dir: Directory where invalid LLM responses are saved.
 
     Returns:
         A provenance-preserving ``QueryResponse`` with grounded citations or a
@@ -163,11 +185,15 @@ def generate_answer(
         )
 
     try:
+        messages = [
+            {"role": "system", "content": SYSTEM_ANSWER_INSTRUCTION},
+            {"role": "user", "content": _prompt(request, retrieval, settings.max_evidence_chunks)},
+        ]
         raw_response = llm.invoke(
-            input=_prompt(request, retrieval, settings.max_evidence_chunks),
-            response_format={"type": "json_object"},
+            input=messages,
+            response_format=AnswerWire,
         )
-        generated = _parse_provider_output(raw_response)
+        generated = _parse_provider_output(raw_response, diagnostics_dir=diagnostics_dir)
         if not generated.answer.strip():
             raise AnswerGenerationError("answer provider returned an empty answer")
         evidence_ids = {item.chunk_id for item in evidence}

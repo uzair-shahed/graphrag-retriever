@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from graphrag_pipeline.answer import AnswerSettings, build_answer_llm, generate_answer
+from graphrag_pipeline.answer import AnswerSettings, AnswerWire, build_answer_llm, generate_answer
 from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
 from graphrag_pipeline.query import EvidenceChunk, QueryRequest
 from graphrag_pipeline.retrieval import RetrievalResult
@@ -59,10 +59,14 @@ def test_generate_answer_returns_grounded_answer_and_citations() -> None:
     assert response.citations == ["chunk-1"]
     assert response.evidence[0].chunk_id == "chunk-1"
     assert response.trace_id == "trace-answer-1"
-    prompt = llm.invoke.call_args.kwargs["input"]
-    assert request().question in prompt
-    assert "chunk-1" in prompt
-    assert "is_supporting" not in prompt
+    messages = llm.invoke.call_args.kwargs["input"]
+    assert isinstance(messages, list)
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    assert request().question in messages[1]["content"]
+    assert "chunk-1" in messages[1]["content"]
+    assert "is_supporting" not in messages[1]["content"]
+    assert llm.invoke.call_args.kwargs["response_format"] is AnswerWire
 
 
 def test_generate_answer_marks_empty_evidence_insufficient_without_provider_call() -> None:
@@ -89,16 +93,19 @@ def test_generate_answer_rejects_provider_citation_outside_evidence() -> None:
     assert "outside retrieved evidence" in response.error
 
 
-def test_generate_answer_rejects_malformed_provider_output() -> None:
-    """Malformed provider output is an explicit failure, never a success."""
+def test_generate_answer_rejects_malformed_provider_output(tmp_path) -> None:
+    """Malformed provider output is an explicit failure and saves raw reply."""
     llm = MagicMock()
     llm.invoke.return_value = SimpleNamespace(content="not json")
 
-    response = generate_answer(request(), retrieval(chunk()), llm)
+    response = generate_answer(request(), retrieval(chunk()), llm, diagnostics_dir=tmp_path)
 
     assert response.status == "failed"
     assert response.answer is None
     assert "malformed JSON" in response.error
+    saved = list(tmp_path.glob("invalid_llm_response_*.txt"))
+    assert len(saved) == 1
+    assert saved[0].read_text(encoding="utf-8") == "not json"
 
 
 def test_generate_answer_rejects_whitespace_only_answer() -> None:
@@ -141,7 +148,20 @@ def test_generate_answer_respects_evidence_bound() -> None:
     )
 
     assert [item.chunk_id for item in response.evidence] == ["chunk-1"]
-    assert "chunk-2" not in llm.invoke.call_args.kwargs["input"]
+    messages = llm.invoke.call_args.kwargs["input"]
+    user_content = messages[1]["content"] if isinstance(messages, list) else str(messages)
+    assert "chunk-2" not in user_content
+
+
+def test_answer_wire_schema_is_strict_compatible() -> None:
+    """AnswerWire schema has required fields, no extra properties, and strict object form."""
+    schema = AnswerWire.model_json_schema()
+    assert schema.get("type") == "object"
+    assert schema.get("additionalProperties") is False
+    assert set(schema.get("required", [])) == {"answer", "citations"}
+    assert schema["properties"]["answer"]["type"] == "string"
+    assert schema["properties"]["citations"]["type"] == "array"
+    assert schema["properties"]["citations"]["items"]["type"] == "string"
 
 
 def test_build_answer_llm_uses_existing_provider_settings() -> None:
@@ -164,3 +184,44 @@ def test_build_answer_llm_uses_existing_provider_settings() -> None:
         embedding_model="local-embedding",
     )
     assert build_answer_llm(ollama).model_name == "local-llm"
+
+
+def test_openai_llm_translates_answer_wire_to_strict_json_schema() -> None:
+    """OpenAILLM translates AnswerWire into OpenAI strict json_schema payload."""
+    openrouter = OpenRouterSettings(
+        api_key="test-key",
+        base_url="https://openrouter.ai/api/v1",
+        llm_model="openai/gpt-4o-mini",
+        embedding_model="openai/text-embedding-3-small",
+        embedding_dimensions=1536,
+        llm_max_tokens=100,
+        require_parameters=True,
+        allow_fallbacks=False,
+    )
+    llm = build_answer_llm(openrouter)
+    llm.client = MagicMock()
+    llm.client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content='{"answer":"Northwind Labs","citations":["chunk-1"]}'
+                )
+            )
+        ],
+        usage=None,
+    )
+
+    response = generate_answer(request(), retrieval(chunk()), llm)
+
+    assert response.status == "succeeded"
+    assert response.answer == "Northwind Labs"
+    create_kwargs = llm.client.chat.completions.create.call_args.kwargs
+    response_format = create_kwargs["response_format"]
+    assert response_format["type"] == "json_schema"
+    json_schema = response_format["json_schema"]
+    assert json_schema["strict"] is True
+    assert json_schema["name"] == "AnswerWire"
+    schema = json_schema["schema"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"answer", "citations"}
+
