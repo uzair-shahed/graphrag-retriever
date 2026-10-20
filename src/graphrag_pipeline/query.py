@@ -90,6 +90,7 @@ class EvidenceChunk(BaseModel):
     score: StrictFloat | None = None
     graph_references: list[StrictStr] = Field(default_factory=list)
     paragraph_hash: StrictStr | None = None
+    paragraph_idx: StrictInt | None = None
 
 
 class QueryResponse(BaseModel):

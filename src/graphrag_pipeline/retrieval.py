@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from neo4j import Driver
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
 from neo4j_graphrag.embeddings.openai import OpenAIEmbeddings
 from neo4j_graphrag.retrievers import VectorCypherRetriever, VectorRetriever
@@ -227,6 +228,14 @@ def _evidence_from_item(item: Any) -> EvidenceChunk:
     references = metadata.get("graph_references") or []
     if not isinstance(references, list) or not all(isinstance(item, str) for item in references):
         raise RetrievalError(f"invalid graph references for {chunk_id!r}")
+    raw_idx = metadata.get("paragraph_idx")
+    paragraph_idx: int | None = None
+    if raw_idx is not None:
+        try:
+            paragraph_idx = int(raw_idx)
+        except (TypeError, ValueError):
+            paragraph_idx = None
+
     return EvidenceChunk(
         chunk_id=chunk_id,
         text=content,
@@ -236,6 +245,7 @@ def _evidence_from_item(item: Any) -> EvidenceChunk:
         score=score,
         graph_references=references,
         paragraph_hash=metadata.get("paragraph_hash"),
+        paragraph_idx=paragraph_idx,
     )
 
 
@@ -273,3 +283,98 @@ def retrieve(
         mode=settings.mode,
         evidence=evidence,
     )
+
+
+def retrieve_per_question(
+    driver: Driver,
+    embedder: Any,
+    question_id: str,
+    question_text: str,
+    *,
+    top_k: int = 5,
+    trace_id: str | None = None,
+    database: str = "neo4j",
+) -> RetrievalResult:
+    """Retrieve top-k candidate paragraphs for a question using exact cosine over IN_CONTEXT links.
+
+    This implements MuSiQue's per-question retrieval contract:
+    - Cosine similarity is computed directly on each candidate chunk embedding in the question context.
+    - Zero leakage by construction: only documents linked via (q:Question {id: $qid})-[:IN_CONTEXT]->(d:Document)
+      are ever evaluated or returned.
+
+    Args:
+        driver: Active Neo4j driver.
+        embedder: Embedding model instance with ``embed_query`` or ``get_embeddings``.
+        question_id: MuSiQue record ID identifying the Question node.
+        question_text: Text of the question to embed.
+        top_k: Number of highest-similarity evidence chunks to return.
+        trace_id: Optional trace ID for provenance tracking.
+        database: Target Neo4j database name.
+
+    Returns:
+        RetrievalResult containing the ranked EvidenceChunk list.
+    """
+    if hasattr(embedder, "embed_query"):
+        qvec = embedder.embed_query(question_text)
+    elif hasattr(embedder, "get_embeddings"):
+        qvec = embedder.get_embeddings([question_text])[0]
+    else:
+        raise ValueError(f"Embedder {embedder!r} does not provide embed_query or get_embeddings")
+
+    query = """
+    MATCH (q:Question {id: $qid})-[ic:IN_CONTEXT]->(d:Document)<-[:FROM_DOCUMENT]-(c:Chunk)
+    WHERE c.embedding IS NOT NULL
+    WITH q, d, c, ic.idx AS idx, vector.similarity.cosine(c.embedding, $qvec) AS score
+    ORDER BY score DESC
+    LIMIT $top_k
+    RETURN c.text AS text,
+           d.paragraph_hash AS paragraph_hash,
+           coalesce(d.title, c.title) AS title,
+           d.document_id AS document_id,
+           d.record_id AS record_id,
+           d.source_file AS source_file,
+           d.source_line AS source_line,
+           idx,
+           score
+    """
+    records, _, _ = driver.execute_query(
+        query,
+        qid=question_id,
+        qvec=qvec,
+        top_k=top_k,
+        database_=database,
+    )
+
+    chunks: list[EvidenceChunk] = []
+    for r in records:
+        p_hash = r.get("paragraph_hash")
+        chunk_id = f"musique:paragraph:{p_hash}" if p_hash else f"chunk-{r.get('idx')}"
+        source_line = r.get("source_line")
+        parsed_source_line: int | None = None
+        if source_line is not None:
+            try:
+                parsed_source_line = int(source_line)
+            except (TypeError, ValueError):
+                parsed_source_line = None
+
+        chunks.append(
+            EvidenceChunk(
+                chunk_id=chunk_id,
+                text=r["text"],
+                document_id=r.get("document_id"),
+                source_file=r.get("source_file"),
+                source_line=parsed_source_line,
+                score=float(r["score"]) if r.get("score") is not None else None,
+                graph_references=[],
+                paragraph_hash=p_hash,
+                paragraph_idx=int(r["idx"]) if r.get("idx") is not None else None,
+            )
+        )
+
+    return RetrievalResult(
+        trace_id=trace_id or f"trace-{question_id}",
+        question=question_text,
+        mode="per_question",
+        evidence=chunks,
+    )
+
