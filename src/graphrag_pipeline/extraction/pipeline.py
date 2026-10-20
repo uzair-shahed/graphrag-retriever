@@ -84,8 +84,9 @@ def build_simple_kg_pipeline(
             later uses it to persist the generated graph.
         settings: Optional provider settings instance. When omitted, the
             function selects a provider using ``GRAPH_RAG_PROVIDER``.
-        schema: Optional GraphSchema to govern extraction. When omitted for
-            OpenRouter, defaults to the curated domain ``SCHEMA_V1``.
+        schema: Optional GraphSchema to govern extraction. When omitted,
+            defaults to the curated domain ``SCHEMA_V1`` for both OpenRouter
+            and Ollama providers.
 
     Returns:
         A configured ``SimpleKGPipeline`` using the selected GraphRAG provider.
@@ -137,7 +138,6 @@ def build_simple_kg_pipeline(
             api_key=settings.api_key,
         )
         embedder = OpenAIEmbeddings(model=settings.embedding_model, **client_kwargs)
-        pipeline_schema: GraphSchema | str = schema or build_schema_v1()
     else:
         llm = OllamaLLM(
             model_name=settings.llm_model,
@@ -145,7 +145,7 @@ def build_simple_kg_pipeline(
             host=settings.host,
         )
         embedder = OllamaEmbeddings(model=settings.embedding_model, host=settings.host)
-        pipeline_schema = "FREE"
+    pipeline_schema: GraphSchema = schema or build_schema_v1()
     text_splitter = FixedSizeSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,

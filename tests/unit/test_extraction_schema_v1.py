@@ -6,13 +6,15 @@ import asyncio
 import json
 import threading
 import urllib.request
+import unittest.mock as mock
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import neo4j
 import pytest
 from neo4j_graphrag.components.schema import GraphSchema, NodeType, RelationshipType
 
-from graphrag_pipeline.config import Neo4jSettings, OpenRouterSettings
+from graphrag_pipeline.config import Neo4jSettings, OllamaSettings, OpenRouterSettings
 from graphrag_pipeline.extraction.pipeline import build_simple_kg_pipeline
 from graphrag_pipeline.extraction.schema_v1 import (
     DOMAIN_NODE_LABELS,
@@ -145,3 +147,43 @@ def test_stub_pipeline_makes_exactly_two_calls_and_zero_schema_invention() -> No
         server.shutdown()
         server.server_close()
         ModelGatewayHandler.reset_defaults()
+
+
+def test_openrouter_and_ollama_builders_receive_same_schema_hash() -> None:
+    """Verify that both OpenRouter and Ollama pipeline builders configure the identical schema hash."""
+    driver = mock.create_autospec(neo4j.Driver, instance=True)
+    driver.execute_query.return_value = (
+        [{"versions": ["5.26.0"], "edition": "community"}],
+        mock.MagicMock(),
+        [],
+    )
+
+    openrouter_settings = OpenRouterSettings(
+        api_key="fake-key",
+        base_url="http://127.0.0.1:9999/v1",
+        llm_model="openai/gpt-4o-mini",
+        embedding_model="openai/text-embedding-3-small",
+        embedding_dimensions=1536,
+        llm_max_tokens=256,
+        require_parameters=True,
+        allow_fallbacks=False,
+    )
+    ollama_settings = OllamaSettings(
+        host="http://127.0.0.1:11434",
+        llm_model="llama3.1:8b",
+        embedding_model="nomic-embed-text",
+    )
+
+    pipe_or = build_simple_kg_pipeline(driver, openrouter_settings)
+    pipe_ol = build_simple_kg_pipeline(driver, ollama_settings)
+
+    schema_or = pipe_or.runner.config.schema_
+    schema_ol = pipe_ol.runner.config.schema_
+
+    assert schema_or is not None
+    assert schema_ol is not None
+    hash_or = compute_schema_hash(schema_or)
+    hash_ol = compute_schema_hash(schema_ol)
+
+    assert hash_or == hash_ol == SCHEMA_V1_HASH
+
