@@ -110,13 +110,28 @@ def test_phase_gate_m6_mvp_retrieval_and_comparative_baselines(
 
     slice_path = Path("eval/slices/ans_dev_mvp_v1.json")
     assert slice_path.exists(), "eval/slices/ans_dev_mvp_v1.json must exist"
+    with slice_path.open("r", encoding="utf-8") as f:
+        slice_data = json.load(f)
 
-    # Find which questions in the slice are already in Neo4j
+    # Establish Question nodes and IN_CONTEXT links for evaluated questions
+    target_ids = set(slice_data["tune_ids"][:5])
+    source_file = Path(slice_data["source_file"])
+    from graphrag_pipeline.ingestion.record_adapter import build_context_links_for_record
+    from graphrag_pipeline.storage.question_context import link_questions_to_paragraphs
+
+    context_links = []
+    with source_file.open("r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            rec = json.loads(line)
+            if rec.get("id") in target_ids:
+                context_links.extend(build_context_links_for_record(line, line_no))
+
     with Neo4jConnection(neo4j_settings) as conn:
+        link_questions_to_paragraphs(conn.connect(), context_links)
         q_records, _, _ = conn.connect().execute_query("MATCH (q:Question) RETURN q.id AS qid")
         db_qids = {r["qid"] for r in q_records}
 
-    assert len(db_qids) > 0, "Neo4j has 0 ingested Question nodes"
+    assert len(db_qids) >= 5, "Neo4j has fewer than 5 ingested Question nodes"
 
     run_1_dir = tmp_path / "run_1"
     report_1, results_1 = run_mvp(
