@@ -143,8 +143,20 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
     max_new_calls: int | None = None
     new_calls_count: int = 0
     fake_unit_cost: float = 0.001
-    upstream_base_url: str = "https://openrouter.ai/api/v1"
     request_history: list[dict[str, Any]] = []
+
+    @classmethod
+    def reset_defaults(cls) -> None:
+        """Reset handler class state back to clean test defaults."""
+        cls.server_mode = "stub"
+        cls.cache_dir = Path("runs/cache")
+        cls.budget_usd = 5.0
+        cls.spent_usd = 0.0
+        cls.max_new_calls = None
+        cls.new_calls_count = 0
+        cls.fake_unit_cost = 0.001
+        cls.upstream_base_url = "https://openrouter.ai/api/v1"
+        cls.request_history.clear()
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass  # Silence default HTTP server console logging
@@ -201,6 +213,10 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
 
         if self.path in ("/config", "/v1/config"):
             cls = type(self)
+            if "mode" in body:
+                cls.server_mode = str(body["mode"])
+            if "cache_dir" in body:
+                cls.cache_dir = Path(body["cache_dir"])
             if "budget_usd" in body:
                 cls.budget_usd = float(body["budget_usd"])
             if "max_new_calls" in body:
@@ -214,10 +230,13 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
             if body.get("reset_spend", False):
                 cls.spent_usd = 0.0
                 cls.new_calls_count = 0
+                cls.request_history.clear()
             self._send_json(
                 200,
                 {
                     "status": "updated",
+                    "mode": cls.server_mode,
+                    "cache_dir": str(cls.cache_dir),
                     "budget_usd": cls.budget_usd,
                     "spent_usd": round(cls.spent_usd, 6),
                     "max_new_calls": cls.max_new_calls,
@@ -366,15 +385,30 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                 {"object": "embedding", "index": i, "embedding": compute_stub_embedding(str(x))}
                 for i, x in enumerate(inputs)
             ]
-            self._send_json(
-                200,
-                {
-                    "object": "list",
-                    "data": data,
-                    "model": body.get("model", "openai/text-embedding-3-small"),
-                    "usage": {"prompt_tokens": 10, "total_tokens": 10, "cost": call_cost},
-                },
-            )
+            resp_payload = {
+                "object": "list",
+                "data": data,
+                "model": body.get("model", "openai/text-embedding-3-small"),
+                "usage": {"prompt_tokens": 10, "total_tokens": 10, "cost": call_cost},
+            }
+            if self.cache_dir:
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_file = self.cache_dir / f"{req_hash}.json"
+                if not cache_file.exists():
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump(
+                            {
+                                "request_hash": req_hash,
+                                "timestamp": time.time(),
+                                "path": self.path,
+                                "request": body,
+                                "response": resp_payload,
+                                "cost": call_cost,
+                            },
+                            f,
+                            indent=2,
+                        )
+            self._send_json(200, resp_payload)
             return
 
         prompt = last_user_prompt(body)
@@ -396,28 +430,44 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         type(self).new_calls_count += 1
         type(self).spent_usd += call_cost
 
-        self._send_json(
-            200,
-            {
-                "id": "chatcmpl-gateway-stub",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": body.get("model", "openai/gpt-4o-mini"),
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "stop",
-                        "message": {"role": "assistant", "content": content},
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": len(prompt) // 4,
-                    "completion_tokens": len(content) // 4,
-                    "total_tokens": (len(prompt) + len(content)) // 4,
-                    "cost": call_cost,
-                },
+        resp_payload = {
+            "id": "chatcmpl-gateway-stub",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": body.get("model", "openai/gpt-4o-mini"),
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": content},
+                }
+            ],
+            "usage": {
+                "prompt_tokens": len(prompt) // 4,
+                "completion_tokens": len(content) // 4,
+                "total_tokens": (len(prompt) + len(content)) // 4,
+                "cost": call_cost,
             },
-        )
+        }
+        if self.cache_dir:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_file = self.cache_dir / f"{req_hash}.json"
+            if not cache_file.exists():
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "request_hash": req_hash,
+                            "timestamp": time.time(),
+                            "path": self.path,
+                            "request": body,
+                            "response": resp_payload,
+                            "cost": call_cost,
+                        },
+                        f,
+                        indent=2,
+                    )
+
+        self._send_json(200, resp_payload)
 
 
 def run_gateway(

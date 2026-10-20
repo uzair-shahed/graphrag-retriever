@@ -117,6 +117,7 @@ def test_gateway_refuses_at_budget_cap_and_matches_forecast() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        ModelGatewayHandler.reset_defaults()
 
 
 def test_gateway_refuses_at_max_new_calls_limit() -> None:
@@ -179,3 +180,4 @@ def test_gateway_refuses_at_max_new_calls_limit() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        ModelGatewayHandler.reset_defaults()

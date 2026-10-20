@@ -131,6 +131,7 @@ def test_gateway_server_answer_wire_and_request_history() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        ModelGatewayHandler.reset_defaults()
 
 
 def test_gateway_receives_experiment_and_demo_profile_requests() -> None:
@@ -174,5 +175,6 @@ def test_gateway_receives_experiment_and_demo_profile_requests() -> None:
     finally:
         server.shutdown()
         server.server_close()
+        ModelGatewayHandler.reset_defaults()
 
 
