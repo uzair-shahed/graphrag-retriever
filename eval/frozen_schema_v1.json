@@ -1,0 +1,47 @@
+{
+  "gate": "Gate-M",
+  "schema_hash": "schema_v1_6b5c5f487c067974",
+  "frozen_date": "2026-10-20",
+  "model": "openai/gpt-4o-mini",
+  "embedding_model": "openai/text-embedding-3-small",
+  "temperature": 0.0,
+  "seed": 20261018,
+  "provider_order": [
+    "openai"
+  ],
+  "allow_fallbacks": false,
+  "require_parameters": true,
+  "node_types": [
+    "Concept",
+    "CreativeWork",
+    "Date",
+    "Event",
+    "Location",
+    "Organization",
+    "Person"
+  ],
+  "relationship_types": [
+    "ACQUIRED",
+    "AWARDED",
+    "BORN_IN",
+    "CAPITAL_OF",
+    "CHILD_OF",
+    "CREATED_BY",
+    "DIED_IN",
+    "EMPLOYED_BY",
+    "FOUNDED_BY",
+    "HEADQUARTERED_IN",
+    "LOCATED_IN",
+    "MEMBER_OF",
+    "OCCURRED_IN",
+    "OCCURRED_ON",
+    "PARENT_OF",
+    "PART_OF",
+    "PERFORMED_BY",
+    "RELATED_TO",
+    "SPOUSE_OF",
+    "SUCCEEDED"
+  ],
+  "additional_node_types": false,
+  "additional_relationship_types": false
+}

@@ -14,10 +14,12 @@ from typing import Any
 
 from neo4j import Driver
 
+from graphrag_pipeline.extraction.schema_v1 import SCHEMA_V1_HASH
+
 logger = logging.getLogger(__name__)
 
 PIPELINE_VERSION = "1.0.0"
-SCHEMA_HASH = "musique_free_v1"
+SCHEMA_HASH = SCHEMA_V1_HASH
 
 
 def ensure_paragraph_hash_constraint(driver: Driver) -> None:
