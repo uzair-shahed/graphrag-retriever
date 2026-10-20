@@ -130,6 +130,8 @@ class QueryResponse(BaseModel):
     retrieval_mode: StrictStr = Field(min_length=1)
     evidence: list[EvidenceChunk] = Field(default_factory=list)
     citations: list[StrictStr] = Field(default_factory=list)
+    predicted_support_idxs: list[StrictInt] = Field(default_factory=list)
+    predicted_answerable: StrictBool | None = None
     latency_seconds: StrictFloat | None = Field(default=None, ge=0)
     error: StrictStr | None = None
 
@@ -142,6 +144,19 @@ class QueryResponse(BaseModel):
             if not self.citations:
                 raise ValueError("successful responses require citations")
         return self
+
+    def to_prediction(self) -> dict[str, Any]:
+        """Convert QueryResponse to the official MuSiQue prediction record format."""
+        return {
+            "id": self.record_id or self.trace_id,
+            "predicted_answer": self.answer or "",
+            "predicted_support_idxs": self.predicted_support_idxs,
+            "predicted_answerable": (
+                self.predicted_answerable
+                if self.predicted_answerable is not None
+                else (self.status == "succeeded")
+            ),
+        }
 
 
 def _source_split(path: Path) -> str:

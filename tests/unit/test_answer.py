@@ -262,3 +262,106 @@ def test_ollama_llm_passes_format_option_without_openai_response_format() -> Non
     assert "response_format" not in chat_kwargs
 
 
+def test_generate_answer_maps_paragraph_hashes_to_predicted_support_idxs() -> None:
+    """Paragraph hashes cited by the model map to predicted_support_idxs and predicted_answerable=True."""
+    llm = MagicMock()
+    llm.invoke.return_value = SimpleNamespace(
+        content='{"answer":"Paris.","citations":["hash_chunk_2", "hash_chunk_0"]}'
+    )
+
+    c0 = EvidenceChunk(
+        chunk_id="musique:paragraph:hash_chunk_0",
+        paragraph_hash="hash_chunk_0",
+        paragraph_idx=10,
+        text="Chunk 0 text",
+    )
+    c1 = EvidenceChunk(
+        chunk_id="musique:paragraph:hash_chunk_1",
+        paragraph_hash="hash_chunk_1",
+        paragraph_idx=5,
+        text="Chunk 1 text",
+    )
+    c2 = EvidenceChunk(
+        chunk_id="musique:paragraph:hash_chunk_2",
+        paragraph_hash="hash_chunk_2",
+        paragraph_idx=18,
+        text="Chunk 2 text",
+        graph_references=["Gong Band"],
+    )
+
+    response = generate_answer(request(), retrieval(c0, c1, c2), llm)
+
+    assert response.status == "succeeded"
+    assert response.answer == "Paris."
+    assert response.predicted_answerable is True
+    # Mapped and sorted paragraph indices
+    assert response.predicted_support_idxs == [10, 18]
+    assert response.citations == ["hash_chunk_2", "hash_chunk_0"]
+
+    pred = response.to_prediction()
+    assert pred["id"] == "record-1"
+    assert pred["predicted_answer"] == "Paris."
+    assert pred["predicted_support_idxs"] == [10, 18]
+    assert pred["predicted_answerable"] is True
+
+
+def test_generate_answer_prompt_includes_bridging_entities() -> None:
+    """Prompt sent to LLM carries top paragraphs and bridging entity names."""
+    llm = MagicMock()
+    llm.invoke.return_value = SimpleNamespace(
+        content='{"answer":"Paris.","citations":["hash_c0"]}'
+    )
+
+    c0 = EvidenceChunk(
+        chunk_id="musique:paragraph:hash_c0",
+        paragraph_hash="hash_c0",
+        paragraph_idx=0,
+        text="Steve Hillage was in Gong.",
+        graph_references=["Gong", "Steve Hillage"],
+    )
+    c1 = EvidenceChunk(
+        chunk_id="musique:paragraph:hash_c1",
+        paragraph_hash="hash_c1",
+        paragraph_idx=1,
+        text="Gong formed in Paris.",
+        graph_references=["Gong"],
+    )
+
+    response = generate_answer(request(), retrieval(c0, c1), llm)
+    assert response.status == "succeeded"
+
+    messages = llm.invoke.call_args.kwargs["input"]
+    user_prompt = messages[1]["content"]
+
+    assert "Bridging entities: Gong, Steve Hillage" in user_prompt
+    assert "[hash_c0] [bridged via: Gong, Steve Hillage] Steve Hillage was in Gong." in user_prompt
+    assert "[hash_c1] [bridged via: Gong] Gong formed in Paris." in user_prompt
+
+
+def test_generate_answer_unretrieved_citation_rejected_and_recorded() -> None:
+    """A citation for an unretrieved id is rejected, recorded in error, and fails loudly."""
+    llm = MagicMock()
+    llm.invoke.return_value = SimpleNamespace(
+        content='{"answer":"Invented answer.","citations":["hallucinated_hash_999"]}'
+    )
+
+    c0 = EvidenceChunk(
+        chunk_id="musique:paragraph:hash_c0",
+        paragraph_hash="hash_c0",
+        paragraph_idx=0,
+        text="Real evidence.",
+    )
+
+    response = generate_answer(request(), retrieval(c0), llm)
+
+    assert response.status == "failed"
+    assert "answer cited chunks outside retrieved evidence" in response.error
+    assert "hallucinated_hash_999" in response.error
+    assert response.predicted_answerable is False
+    assert response.predicted_support_idxs == []
+
+    pred = response.to_prediction()
+    assert pred["predicted_answerable"] is False
+    assert pred["predicted_support_idxs"] == []
+
+

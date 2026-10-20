@@ -61,9 +61,9 @@ class GeneratedAnswer(BaseModel):
 SYSTEM_ANSWER_INSTRUCTION = (
     "Answer the question using only the graph evidence below. "
     "Return valid JSON with exactly two fields: answer (string) and "
-    "citations (array of chunk_id strings). Every citation must identify "
-    "evidence used in the answer. If the evidence does not support an "
-    "answer, do not guess."
+    "citations (array of string identifiers). Every citation must identify "
+    "evidence used in the answer matching the bracketed [id] labels. "
+    "If the evidence does not support an answer, do not guess."
 )
 
 
@@ -134,13 +134,19 @@ def build_answer_llm(
 
 
 def _prompt(request: QueryRequest, retrieval: RetrievalResult, limit: int) -> str:
-    """Build a user prompt containing only the question and graph evidence."""
+    """Build a user prompt containing the question, graph evidence, and bridging entity names."""
     evidence = retrieval.evidence[:limit]
+    all_bridges = sorted({b for item in evidence for b in item.graph_references})
+    bridge_prefix = f"Bridging entities: {', '.join(all_bridges)}\n\n" if all_bridges else ""
     context = "\n\n".join(
-        f"[{item.chunk_id}] {item.text}" for item in evidence
+        f"[{item.paragraph_hash or item.chunk_id}]"
+        + (f" [bridged via: {', '.join(item.graph_references)}]" if item.graph_references else "")
+        + f" {item.text}"
+        for item in evidence
     )
     return (
         f"Question: {request.question}\n\n"
+        f"{bridge_prefix}"
         f"Graph evidence:\n{context}"
     )
 
@@ -203,6 +209,8 @@ def generate_answer(
             **metadata,
             status="insufficient_evidence",
             retrieval_mode=settings.retrieval_mode,
+            predicted_support_idxs=[],
+            predicted_answerable=False,
         )
 
     try:
@@ -223,19 +231,52 @@ def generate_answer(
         generated = _parse_provider_output(raw_response, diagnostics_dir=diagnostics_dir)
         if not generated.answer.strip():
             raise AnswerGenerationError("answer provider returned an empty answer")
-        evidence_ids = {item.chunk_id for item in evidence}
-        invalid_citations = [citation for citation in generated.citations if citation not in evidence_ids]
+
+        valid_citations: dict[str, EvidenceChunk] = {}
+        for item in evidence:
+            if item.chunk_id:
+                valid_citations[item.chunk_id] = item
+            if item.paragraph_hash:
+                valid_citations[item.paragraph_hash] = item
+            if item.paragraph_idx is not None:
+                valid_citations[str(item.paragraph_idx)] = item
+
+        invalid_citations = [
+            citation for citation in generated.citations
+            if citation not in valid_citations
+        ]
         if invalid_citations:
+            logger.warning(
+                "Rejected non-retrieved citations %r for question %r (valid tokens: %r)",
+                invalid_citations,
+                request.question,
+                list(valid_citations.keys()),
+            )
             raise AnswerGenerationError(
                 f"answer cited chunks outside retrieved evidence: {invalid_citations}"
             )
+
+        cited_idxs: list[int] = []
+        normalized_citations: list[str] = []
+        for citation in generated.citations:
+            matched_chunk = valid_citations[citation]
+            norm_id = matched_chunk.paragraph_hash or matched_chunk.chunk_id
+            if norm_id not in normalized_citations:
+                normalized_citations.append(norm_id)
+            if matched_chunk.paragraph_idx is not None and matched_chunk.paragraph_idx not in cited_idxs:
+                cited_idxs.append(matched_chunk.paragraph_idx)
+
+        cited_idxs.sort()
+
         return QueryResponse(
             **metadata,
             status="succeeded",
             answer=generated.answer,
             retrieval_mode=settings.retrieval_mode,
             evidence=evidence,
-            citations=generated.citations,
+            citations=normalized_citations,
+            predicted_support_idxs=cited_idxs,
+            predicted_answerable=True,
         )
     except AnswerGenerationError as error:
         return QueryResponse(
@@ -244,6 +285,8 @@ def generate_answer(
             retrieval_mode=settings.retrieval_mode,
             evidence=evidence,
             error=str(error),
+            predicted_support_idxs=[],
+            predicted_answerable=False,
         )
     except Exception as error:  # noqa: BLE001 - provider errors become failed responses
         return QueryResponse(
@@ -252,4 +295,6 @@ def generate_answer(
             retrieval_mode=settings.retrieval_mode,
             evidence=evidence,
             error=f"answer generation failed: {error}",
+            predicted_support_idxs=[],
+            predicted_answerable=False,
         )
