@@ -225,3 +225,34 @@ def test_openai_llm_translates_answer_wire_to_strict_json_schema() -> None:
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == {"answer", "citations"}
 
+
+def test_ollama_llm_passes_format_option_without_openai_response_format() -> None:
+    """OllamaLLM receives format option with JSON schema and no OpenAI response_format."""
+    ollama_settings = OllamaSettings(
+        host="http://localhost:11434",
+        llm_model="local-llm",
+        embedding_model="local-embedding",
+    )
+    llm = build_answer_llm(ollama_settings)
+    mock_client = MagicMock()
+    mock_client.chat.return_value = SimpleNamespace(
+        message=SimpleNamespace(
+            content='{"answer":"Local Aster Systems.","citations":["chunk-1"]}'
+        ),
+        prompt_eval_count=12,
+        eval_count=6,
+    )
+    llm.client = mock_client
+
+    response = generate_answer(request(), retrieval(chunk()), llm)
+
+    assert response.status == "succeeded"
+    assert response.answer == "Local Aster Systems."
+    assert response.citations == ["chunk-1"]
+
+    chat_kwargs = mock_client.chat.call_args.kwargs
+    assert "format" in chat_kwargs
+    assert chat_kwargs["format"] == AnswerWire.model_json_schema()
+    assert "response_format" not in chat_kwargs
+
+

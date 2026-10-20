@@ -189,10 +189,16 @@ def generate_answer(
             {"role": "system", "content": SYSTEM_ANSWER_INSTRUCTION},
             {"role": "user", "content": _prompt(request, retrieval, settings.max_evidence_chunks)},
         ]
-        raw_response = llm.invoke(
-            input=messages,
-            response_format=AnswerWire,
-        )
+        if isinstance(llm, OllamaLLM):
+            raw_response = llm.invoke(
+                input=messages,
+                format=AnswerWire.model_json_schema(),
+            )
+        else:
+            raw_response = llm.invoke(
+                input=messages,
+                response_format=AnswerWire,
+            )
         generated = _parse_provider_output(raw_response, diagnostics_dir=diagnostics_dir)
         if not generated.answer.strip():
             raise AnswerGenerationError("answer provider returned an empty answer")
