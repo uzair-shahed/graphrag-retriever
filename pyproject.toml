@@ -5,6 +5,7 @@ description = "Self-Correcting GraphRAG Knowledge Pipeline with Autonomous Entit
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "httpx>=0.27,<1",
     "langchain-community==0.4.1",
     "neo4j>=5.24,<6",
     "neo4j-graphrag[ollama,openai]>=1.21,<2",
@@ -26,6 +27,7 @@ browser-tests = [
 [project.scripts]
 graphrag-query = "graphrag_pipeline.query_command:main"
 graphrag-eval = "graphrag_pipeline.evaluation.command:main"
+graphrag-extraction-benchmark = "graphrag_pipeline.extraction_benchmark.command:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

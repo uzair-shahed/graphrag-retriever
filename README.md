@@ -82,6 +82,131 @@ and [exit codes](vectorrag_vs_graphrag_evaluation_ragas.md#exit-codes-and-recove
 Use `uv run --locked graphrag-eval run --help` for command-line help or see the
 [operational evaluation reference](documentation.md#paired-vectorraggraphrag-evaluation-command-reference).
 
+## Standalone paragraph extraction benchmark
+
+`graphrag-extraction-benchmark` compares entity and relationship extraction on
+**150 individual MuSiQue paragraphs** using OpenRouter or Ollama. First generate
+model-produced gold with an explicitly selected OpenRouter reasoning model,
+then compare candidate models using deterministic entity/relation precision,
+recall and F1. It saves JSONL results and accesses no Neo4j or RAGAS services.
+These scores measure extraction quality as a proxy for possible GraphRAG impact.
+
+The [complete benchmark reference and milestone record](agent-coordination/entity-extraction-benchmark/entity-extraction-benchmark.md)
+contains artifact formats, scoring rules, recovery details, tests and every
+flag. Run these commands from the repository root:
+
+```sh
+uv sync --locked --extra dev
+uv run --locked graphrag-extraction-benchmark --help
+uv run --locked graphrag-extraction-benchmark select
+```
+
+`select` previews the first 150 paragraphs in dataset/list order from
+`dataset/musique/data/data/musique_ans_v1.0_dev.jsonl`. It writes no artifacts and
+makes no service calls. Use `--paragraphs 3` for a smaller preview.
+
+### Generate and resume OpenRouter gold labels
+
+Set `OPENROUTER_API_KEY` in `.env` or your environment. Replace
+`YOUR_REASONING_MODEL_ID` with your chosen OpenRouter model ID supporting
+structured output and the requested reasoning effort. Model support is checked
+before generation. Start with a local preview, then generate the gold:
+
+```sh
+uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --dry-run
+uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150
+```
+
+Gold uses OpenRouter and requires an explicit enabled reasoning effort. Calls
+may incur charges. The default selection is 150 paragraphs; a separate smoke
+run can use `--paragraphs 2` and a different output directory.
+
+Resume with the same model, effort, budget and other settings:
+
+```sh
+uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --resume
+uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --resume --retry-failed
+```
+
+Resume skips saved attempts. `--retry-failed` also retries failures while
+preserving successful rows. Changed settings or source content require a new
+output directory. Candidate evaluation requires complete successful gold.
+
+### Choose Ollama, OpenRouter, or both for candidates
+
+For a local candidate, start Ollama, install the chosen model and use its tag:
+
+```sh
+ollama pull qwen3:4b
+uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-150 --model ollama:qwen3:4b --ollama-think false --output runs/entity-extraction/local-candidate
+```
+
+For a hosted candidate, use its OpenRouter model ID:
+
+```sh
+uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-150 --model openrouter:openai/gpt-4o-mini --output runs/entity-extraction/hosted-candidate
+```
+
+Repeat `--model` to compare several models against the same gold in one run:
+
+```sh
+uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-150 --model ollama:qwen3:4b --model openrouter:openai/gpt-4o-mini --ollama-think false --output runs/entity-extraction/mixed-models
+```
+
+Only the first colon separates the provider from the model: `ollama:qwen3:4b`
+sends model `qwen3:4b` to Ollama. Models are examples; availability and parameter
+support depend on your endpoint. For reasoning-capable hosted candidates, add
+`--reasoning-effort medium` or another supported effort. Otherwise omit it to
+use the model default. Ollama accepts `--ollama-think default`, `true`, `false`,
+or a model-supported string. Use separate runs to compare the same model under
+different settings. Candidate runs support `--dry-run`, `--resume` and
+`--retry-failed` too.
+
+Each candidate receives title/text and the same structured schema, without gold
+labels. Per-paragraph and micro scores include failed predictions as empty sets.
+Artifacts include `manifest.json`, `cohort.jsonl`, `gold.jsonl` or
+`predictions.jsonl`, and `summary.json`; candidate runs freeze a local gold copy.
+
+### Offline summaries and all flags
+
+Regenerate a saved run's JSON summary without providers or the original dataset:
+
+```sh
+uv run --locked graphrag-extraction-benchmark report --input runs/entity-extraction/mixed-models
+```
+
+| Flag | Commands | Default / accepted values |
+| --- | --- | --- |
+| `--dataset-path PATH` | `select`, `gold` | MuSiQue dev JSONL path above. |
+| `--paragraphs N` | `select`, `gold` | `150`; positive paragraph count. |
+| `--model MODEL` | `gold` | Required OpenRouter model ID. |
+| `--model PROVIDER:MODEL` | `run` | Required, repeatable; `ollama` or `openrouter`. |
+| `--reasoning-effort LEVEL` | `gold`, `run` | Required for gold: `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Optional for candidates, also allowing `none`; omitted uses model default. |
+| `--ollama-think VALUE` | `run` | `default`, `true`, `false`, or model-supported string. |
+| `--gold DIR` | `run` | Required complete gold run directory. |
+| `--output DIR` | `gold`, `run` | Required new/empty directory, or matching existing run with `--resume`. |
+| `--max-tokens N` | `gold`, `run` | `16384`; positive output budget including reasoning where applicable. |
+| `--timeout SECONDS` | `gold`, `run` | `180`; positive finite per-request timeout. |
+| `--retries N` | `gold`, `run` | `2`; additional transient HTTP/transport retries. |
+| `--openrouter-base-url URL` | `gold`, `run` | `OPENROUTER_BASE_URL`, then `https://openrouter.ai/api/v1`. |
+| `--ollama-host URL` | `run` | `OLLAMA_HOST`, then `http://localhost:11434`; native API host. |
+| `--resume` | `gold`, `run` | Off; continue with matching source/configuration. |
+| `--retry-failed` | `gold`, `run` | Off; requires `--resume`. |
+| `--no-progress` | `gold`, `run` | Off; hide stderr progress. |
+| `--dry-run` | `gold`, `run` | Off; local preview without service access or writes. |
+| `--input DIR` | `report` | Required existing gold/candidate run. |
+| `-h`, `--help` | All | Show command help. |
+
+Provider/model choice is explicit in these commands. Existing
+`GRAPH_RAG_PROVIDER` and `RAGAS_PROVIDER` values do not select benchmark models.
+The CLI reads `.env` for endpoint/key configuration; no embedding settings are
+required. The module entry point is also available before reinstalling scripts:
+
+```sh
+.venv/bin/python -m graphrag_pipeline.extraction_benchmark.command --help
+uv run --locked python -m pytest tests/unit/test_extraction_benchmark.py tests/unit/test_extraction_benchmark_runtime.py -q
+```
+
 ## Windows Quick Start
 
 The initial Windows target is Windows 11 x64 with PowerShell and Python 3.14.3.

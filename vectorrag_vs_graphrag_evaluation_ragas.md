@@ -28,6 +28,7 @@ CLI does not use `GRAPH_RAG_DATASET_PATHS` or accept the full/test splits.
 - [Scores and output](#scores-and-output)
 - [Exit codes and recovery](#exit-codes-and-recovery)
 - [Implementation and validation history](#implementation-and-validation-history)
+- [Standalone paragraph extraction benchmark](#standalone-paragraph-extraction-benchmark)
 
 ## Installation and invocation
 
@@ -827,3 +828,17 @@ Validation evidence:
 No unexpected report runtime problems remain. Full-report printing deliberately
 expands all record/condition contexts and can be expensive for large runs. No
 implementation subtasks remain for the approved report plan.
+
+## Standalone paragraph extraction benchmark
+
+The separate entity/relation extraction benchmark is documented in
+[its own reference and milestone record](agent-coordination/entity-extraction-benchmark/entity-extraction-benchmark.md).
+That document contains all commands, flags, provider/model selection, JSONL
+artifact formats, resume behavior, deterministic scoring rules, tests and
+implementation progress. [README examples](README.md#standalone-paragraph-extraction-benchmark)
+provide the quick start.
+
+All four implementation subtasks are now implemented. The earlier cohort/schema
+checkpoint and README-only documentation history have moved to that dedicated
+record. The benchmark has its own `graphrag-extraction-benchmark` command and
+artifacts; the RAGAS runtime and `graphrag-eval` behavior are unchanged.
