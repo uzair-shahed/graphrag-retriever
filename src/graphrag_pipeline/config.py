@@ -187,6 +187,8 @@ class OllamaSettings:
     embedding_model: str
     chunk_size: int = 10000
     chunk_overlap: int = 0
+    request_timeout_seconds: int = 120
+    llm_max_tokens: int = 4096
 
     @classmethod
     def from_env(cls) -> "OllamaSettings":
@@ -205,6 +207,8 @@ class OllamaSettings:
             embedding_model=embedding_model,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            request_timeout_seconds=_get_positive_int_env("OLLAMA_REQUEST_TIMEOUT_SECONDS", 120),
+            llm_max_tokens=_get_positive_int_env("OLLAMA_LLM_MAX_TOKENS", 4096),
         )
 
 

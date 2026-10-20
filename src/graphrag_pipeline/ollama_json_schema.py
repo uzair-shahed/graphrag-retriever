@@ -86,6 +86,36 @@ class OllamaJSONSchemaLLM(OllamaLLM):
             return self.get_messages_v2(input)
         raise ValueError(f"Invalid input type for Ollama JSON Schema LLM: {type(input)}")
 
+    def _chat_payload(
+        self,
+        input: str | list[LLMMessage],
+        message_history: list[LLMMessage] | MessageHistory | None,
+        system_instruction: str | None,
+        response_format: type[BaseModel] | dict[str, Any] | None,
+        kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Serialize chat using the locked SDK while retaining the server's think flag.
+
+        GraphRAG requires Ollama <0.5; its ChatRequest and chat() signature
+        predate think. Use its existing HTTP transport and response parsing,
+        adding this server-supported field after SDK serialization.
+        """
+        from ollama._types import ChatRequest
+
+        params = {**self.model_params, **kwargs}
+        payload = ChatRequest(
+            **{
+                **params,
+                "model": self.model_name,
+                "messages": self._messages(input, message_history, system_instruction),
+                "format": self._schema_for(response_format),
+                "stream": False,
+            }
+        ).model_dump(mode="json", exclude_none=True)
+        if "think" in params:
+            payload["think"] = params["think"]
+        return payload
+
     @staticmethod
     def _response(response: Any) -> LLMResponse:
         """Convert Ollama content and optional token counts to GraphRAG's response."""
@@ -124,12 +154,13 @@ class OllamaJSONSchemaLLM(OllamaLLM):
             GraphRAG response content and token usage, when reported.
         """
         try:
-            response = self.client.chat(
-                model=self.model_name,
-                messages=self._messages(input, message_history, system_instruction),
-                format=self._schema_for(response_format),
-                options=self.model_params.get("options", {}),
-                **kwargs,
+            response = self.client._request(
+                self.ollama.ChatResponse,
+                "POST",
+                "/api/chat",
+                json=self._chat_payload(
+                    input, message_history, system_instruction, response_format, kwargs
+                ),
             )
         except self.ollama.ResponseError as error:
             raise LLMGenerationError(error) from error
@@ -157,12 +188,13 @@ class OllamaJSONSchemaLLM(OllamaLLM):
             GraphRAG response content and token usage, when reported.
         """
         try:
-            response = await self.async_client.chat(
-                model=self.model_name,
-                messages=self._messages(input, message_history, system_instruction),
-                format=self._schema_for(response_format),
-                options=self.model_params.get("options", {}),
-                **kwargs,
+            response = await self.async_client._request(
+                self.ollama.ChatResponse,
+                "POST",
+                "/api/chat",
+                json=self._chat_payload(
+                    input, message_history, system_instruction, response_format, kwargs
+                ),
             )
         except self.ollama.ResponseError as error:
             raise LLMGenerationError(error) from error

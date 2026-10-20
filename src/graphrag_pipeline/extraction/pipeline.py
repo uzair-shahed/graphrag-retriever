@@ -53,12 +53,13 @@ def build_simple_kg_pipeline(
     """
     settings = settings or model_settings_from_env()
     if isinstance(settings, OpenRouterSettings):
-        client_kwargs = {"api_key": settings.api_key, "base_url": settings.base_url}
+        client_kwargs = {"api_key": settings.api_key,
+                         "base_url": settings.base_url}
         llm = DebuggableOpenAILLM(
             model_name=settings.llm_model,
             model_params={
                 # "temperature": 0, # -- Must be disabled for some providers which do not support temperature
-                "reasoning_effort": "none", # -- This can be toggled depending on provider
+                "reasoning_effort": "none",  # -- This can be toggled depending on provider
                 "max_tokens": settings.llm_max_tokens,
                 "extra_body": {
                     "provider": {
@@ -70,18 +71,22 @@ def build_simple_kg_pipeline(
             base_url=settings.base_url,
             api_key=settings.api_key,
         )
-        embedder = OpenAIEmbeddings(model=settings.embedding_model, **client_kwargs)
+        embedder = OpenAIEmbeddings(
+            model=settings.embedding_model, **client_kwargs)
     else:
         llm = OllamaJSONSchemaLLM(
             model_name=settings.llm_model,
             response_model=Neo4jGraph,
             model_params={
-                # "think": False, # -- Does not need to always be active. Only turn on if using a hybrid model like qwen3:8b
-                "options": {"temperature": 0}
-                },
+                # "think": False,  # -- Does not need to always be active. Only turn on if using a hybrid model like qwen3:8b
+                "options": {"temperature": 0, "num_predict": settings.llm_max_tokens}
+            },
             host=settings.host,
+            timeout=settings.request_timeout_seconds,
         )
-        embedder = OllamaEmbeddings(model=settings.embedding_model, host=settings.host)
+        embedder = OllamaEmbeddings(
+            model=settings.embedding_model, host=settings.host,
+            timeout=settings.request_timeout_seconds)
         schema = "FREE"
     if isinstance(settings, OpenRouterSettings):
         # A fixed free schema avoids per-run automatic schema generation and

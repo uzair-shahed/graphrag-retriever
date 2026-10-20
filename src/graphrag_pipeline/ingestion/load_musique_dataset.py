@@ -367,9 +367,14 @@ async def run_requests(
         pipeline = build_simple_kg_pipeline(driver, openrouter_settings, neo4j_settings=neo4j_settings)
         progress = tqdm(
             total=len(requests),
-            desc="Loading MuSiQue chunks",
+            desc="MuSiQue",
             unit="chunk",
             disable=not show_progress,
+            dynamic_ncols=True,
+            # Keep timing/counts before the bar so narrower terminals retain
+            # the useful metrics. Force seconds/chunk even for fast skips.
+            bar_format="{desc}: {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_inv_fmt}{postfix}] |{bar}|",
+            postfix={"records_loaded": f"0/{total_records}", "failed": 0},
         )
         try:
             for index, request in enumerate(requests):
@@ -396,6 +401,7 @@ async def run_requests(
                             manifest.mark_verified(request.chunk_id)
                         outcome.skipped_verified.append(request.chunk_id)
                         progress.update(1)
+                        progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
                         continue
                     if ingested.state.state != COMPLETE:
                         report = ingested.state.to_report(request)

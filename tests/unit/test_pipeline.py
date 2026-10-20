@@ -98,8 +98,12 @@ def test_pipeline_factory_builds_ollama_components() -> None:
         assert llm.response_schema == Neo4jGraph.model_json_schema()
         assert llm.supports_structured_output is True
         assert llm.model_params["options"]["temperature"] == 0
+        assert llm.model_params["think"] is False
+        assert llm.model_params["options"]["num_predict"] == 4096
+        assert llm.async_client._client.timeout.read == 120
         assert type(embedder).__name__ == "OllamaEmbeddings"
         assert embedder.model == "nomic-embed-text"
+        assert embedder.async_client._client.timeout.read == 120
         assert embedder.client._client.base_url == "http://localhost:11434"
         assert pipeline.runner.config.from_file is False
         assert pipeline.runner.config.on_error.value == "RAISE"

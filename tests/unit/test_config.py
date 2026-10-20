@@ -107,6 +107,21 @@ def test_model_settings_from_env_reads_chunk_settings(monkeypatch: pytest.Monkey
     assert settings.chunk_overlap == 250
 
 
+def test_ollama_request_limits_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_REQUEST_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("OLLAMA_LLM_MAX_TOKENS", "1024")
+    settings = OllamaSettings.from_env()
+    assert settings.request_timeout_seconds == 45
+    assert settings.llm_max_tokens == 1024
+
+
+@pytest.mark.parametrize("name", ["OLLAMA_REQUEST_TIMEOUT_SECONDS", "OLLAMA_LLM_MAX_TOKENS"])
+def test_ollama_rejects_unbounded_limits(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    monkeypatch.setenv(name, "0")
+    with pytest.raises(ValueError, match=name):
+        OllamaSettings.from_env()
+
+
 def test_model_settings_from_env_rejects_invalid_chunk_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
     """Chunk overlap must be smaller than chunk size."""
     monkeypatch.setenv("GRAPH_RAG_PROVIDER", "ollama")
