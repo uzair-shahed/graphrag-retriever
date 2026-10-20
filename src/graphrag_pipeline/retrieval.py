@@ -285,6 +285,197 @@ def retrieve(
     )
 
 
+def retrieve_walk(
+    driver: Driver,
+    embedder: Any,
+    question_id: str,
+    question_text: str,
+    *,
+    top_k: int = 5,
+    seeds: int = 2,
+    fanout: int = 2,
+    trace_id: str | None = None,
+    database: str = "neo4j",
+) -> RetrievalResult:
+    """Retrieve top-k candidate paragraphs for a question using a bounded graph walk across linked entities.
+
+    Traversal:
+        1. Seeds: Top-ranked candidate chunks by cosine similarity to question embedding.
+        2. Graph Walk: For each seed chunk, traverse to its entities, cross SAME_AS cluster links,
+           and find other candidate chunks in the same question's IN_CONTEXT paragraphs.
+        3. Scored by: bridges * seed.score (bounded by $fanout per seed).
+        4. Ranking order: Top seeds -> expansions ordered by expansion score -> remaining cosine candidates.
+        5. Zero cross-question leakage guaranteed by IN_CONTEXT restriction.
+
+    Args:
+        driver: Active Neo4j driver.
+        embedder: Embedding model instance with ``embed_query`` or ``get_embeddings``.
+        question_id: MuSiQue record ID identifying the Question node.
+        question_text: Text of the question to embed.
+        top_k: Total number of paragraphs to return (default 5).
+        seeds: Number of highest-similarity chunks to expand from (default 2).
+        fanout: Maximum number of expansion hops to retain per seed (default 2).
+        trace_id: Optional trace ID for provenance tracking.
+        database: Target Neo4j database name.
+
+    Returns:
+        RetrievalResult containing the ranked EvidenceChunk list with bridging entity references.
+    """
+    if hasattr(embedder, "embed_query"):
+        qvec = embedder.embed_query(question_text)
+    elif hasattr(embedder, "get_embeddings"):
+        qvec = embedder.get_embeddings([question_text])[0]
+    else:
+        raise ValueError(f"Embedder {embedder!r} does not provide embed_query or get_embeddings")
+
+    query = """
+    CYPHER 25
+    MATCH (q:Question {id: $qid})-[ic:IN_CONTEXT]->(d:Document)<-[:FROM_DOCUMENT]-(c:Chunk)
+    WHERE c.embedding IS NOT NULL
+    WITH q, d, c, ic.idx AS idx, vector.similarity.cosine(c.embedding, $qvec) AS score
+    ORDER BY score DESC
+    WITH q, collect({
+        chunk: c,
+        idx: idx,
+        score: score,
+        text: c.text,
+        paragraph_hash: d.paragraph_hash,
+        title: coalesce(d.title, c.title),
+        document_id: d.document_id,
+        record_id: d.record_id,
+        source_file: d.source_file,
+        source_line: d.source_line
+    }) AS ranked
+    UNWIND ranked[0..$seeds] AS seed
+    OPTIONAL CALL (q, seed) {
+      WITH seed.chunk AS c
+      MATCH (e:__Entity__)-[:FROM_CHUNK]->(c)
+      MATCH (e)-[:SAME_AS {decision: 'link'}]->(:EntityCluster)<-[:SAME_AS {decision: 'link'}]-(n:__Entity__)
+            -[:FROM_CHUNK]->(c2:Chunk)-[:FROM_DOCUMENT]->(:Document)<-[ic2:IN_CONTEXT]-(q)
+      WHERE c2 <> c
+      RETURN ic2.idx AS hop_idx, count(DISTINCT e) AS bridges, collect(DISTINCT e.name) AS bridge_names
+      ORDER BY bridges DESC
+      LIMIT $fanout
+    }
+    WITH ranked, collect(CASE WHEN hop_idx IS NOT NULL
+         THEN {idx: hop_idx, bridges: bridges, seed_score: seed.score, bridge_names: bridge_names} END) AS hops
+    RETURN ranked, hops
+    """
+
+    records, _, _ = driver.execute_query(
+        query,
+        qid=question_id,
+        qvec=qvec,
+        seeds=seeds,
+        fanout=fanout,
+        database_=database,
+    )
+
+    if not records:
+        return RetrievalResult(
+            trace_id=trace_id or f"trace-{question_id}",
+            question=question_text,
+            mode="graph_walk",
+            evidence=[],
+        )
+
+    row = records[0]
+    ranked = row.get("ranked") or []
+    hops = row.get("hops") or []
+
+    by_idx = {r["idx"]: r for r in ranked}
+    seed_count = min(seeds, len(ranked))
+    seed_items = ranked[:seed_count]
+    seed_idxs = {s["idx"] for s in seed_items}
+
+    hop_map: dict[int, dict[str, Any]] = {}
+    for h in hops:
+        if not h or h.get("idx") is None:
+            continue
+        h_idx = int(h["idx"])
+        if h_idx in seed_idxs:
+            continue
+        bridges = int(h.get("bridges", 0))
+        seed_score = float(h.get("seed_score", 0.0))
+        score_increment = bridges * seed_score
+        b_names = h.get("bridge_names") or []
+        if h_idx not in hop_map:
+            hop_map[h_idx] = {
+                "idx": h_idx,
+                "expansion_score": score_increment,
+                "bridge_names": set(b_names),
+                "bridges": bridges,
+            }
+        else:
+            hop_map[h_idx]["expansion_score"] += score_increment
+            hop_map[h_idx]["bridge_names"].update(b_names)
+            hop_map[h_idx]["bridges"] += bridges
+
+    sorted_hops = sorted(
+        hop_map.values(),
+        key=lambda x: (x["expansion_score"], x["bridges"]),
+        reverse=True,
+    )
+
+    final_selected: list[tuple[dict[str, Any], list[str]]] = []
+    seen_idxs: set[int] = set()
+
+    for s in seed_items:
+        s_idx = s["idx"]
+        if s_idx not in seen_idxs:
+            seen_idxs.add(s_idx)
+            final_selected.append((s, []))
+
+    for h in sorted_hops:
+        h_idx = h["idx"]
+        if h_idx not in seen_idxs and h_idx in by_idx:
+            seen_idxs.add(h_idx)
+            final_selected.append((by_idx[h_idx], sorted(h["bridge_names"])))
+            if len(final_selected) >= top_k:
+                break
+
+    for r in ranked:
+        if len(final_selected) >= top_k:
+            break
+        r_idx = r["idx"]
+        if r_idx not in seen_idxs:
+            seen_idxs.add(r_idx)
+            final_selected.append((r, []))
+
+    chunks: list[EvidenceChunk] = []
+    for item, bridges in final_selected:
+        p_hash = item.get("paragraph_hash")
+        chunk_id = f"musique:paragraph:{p_hash}" if p_hash else f"chunk-{item.get('idx')}"
+        source_line = item.get("source_line")
+        parsed_source_line: int | None = None
+        if source_line is not None:
+            try:
+                parsed_source_line = int(source_line)
+            except (TypeError, ValueError):
+                parsed_source_line = None
+
+        chunks.append(
+            EvidenceChunk(
+                chunk_id=chunk_id,
+                text=item["text"],
+                document_id=item.get("document_id"),
+                source_file=item.get("source_file"),
+                source_line=parsed_source_line,
+                score=float(item["score"]) if item.get("score") is not None else None,
+                graph_references=bridges,
+                paragraph_hash=p_hash,
+                paragraph_idx=int(item["idx"]) if item.get("idx") is not None else None,
+            )
+        )
+
+    return RetrievalResult(
+        trace_id=trace_id or f"trace-{question_id}",
+        question=question_text,
+        mode="graph_walk",
+        evidence=chunks,
+    )
+
+
 def retrieve_per_question(
     driver: Driver,
     embedder: Any,
@@ -292,13 +483,17 @@ def retrieve_per_question(
     question_text: str,
     *,
     top_k: int = 5,
+    seeds: int = 2,
+    fanout: int = 2,
+    walk: bool = False,
     trace_id: str | None = None,
     database: str = "neo4j",
 ) -> RetrievalResult:
-    """Retrieve top-k candidate paragraphs for a question using exact cosine over IN_CONTEXT links.
+    """Retrieve top-k candidate paragraphs for a question using cosine or bounded walk over IN_CONTEXT links.
 
     This implements MuSiQue's per-question retrieval contract:
-    - Cosine similarity is computed directly on each candidate chunk embedding in the question context.
+    - Cosine similarity is computed directly on candidate chunk embeddings in the question context.
+    - If walk=True, expands top seeds across SAME_AS entity cluster links.
     - Zero leakage by construction: only documents linked via (q:Question {id: $qid})-[:IN_CONTEXT]->(d:Document)
       are ever evaluated or returned.
 
@@ -307,13 +502,29 @@ def retrieve_per_question(
         embedder: Embedding model instance with ``embed_query`` or ``get_embeddings``.
         question_id: MuSiQue record ID identifying the Question node.
         question_text: Text of the question to embed.
-        top_k: Number of highest-similarity evidence chunks to return.
+        top_k: Number of highest-ranked evidence chunks to return.
+        seeds: Number of highest-similarity chunks to expand from if walk=True.
+        fanout: Maximum number of expansion hops per seed if walk=True.
+        walk: Whether to perform graph walk across entity clusters (default False).
         trace_id: Optional trace ID for provenance tracking.
         database: Target Neo4j database name.
 
     Returns:
         RetrievalResult containing the ranked EvidenceChunk list.
     """
+    if walk:
+        return retrieve_walk(
+            driver=driver,
+            embedder=embedder,
+            question_id=question_id,
+            question_text=question_text,
+            top_k=top_k,
+            seeds=seeds,
+            fanout=fanout,
+            trace_id=trace_id,
+            database=database,
+        )
+
     if hasattr(embedder, "embed_query"):
         qvec = embedder.embed_query(question_text)
     elif hasattr(embedder, "get_embeddings"):
