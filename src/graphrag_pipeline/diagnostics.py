@@ -15,13 +15,13 @@ from typing import Any
 
 
 _SECRET_PATTERN = re.compile(
-    r"(?i)(bearer\s+|sk-or-v1-[A-Za-z0-9]+|api[_-]?key[\"']?\s*[:=]\s*[\"']?)[^\s,\"'}]+"
+    r"(?i)(bearer\s+|api[_-]?key[\"']?\s*[:=]\s*[\"']?)[^\s,\"'}]+|sk-or-v1-[A-Za-z0-9_-]+"
 )
 
 
 def _redact(value: str) -> str:
     """Redact bearer tokens and common API-key values from diagnostic text."""
-    return _SECRET_PATTERN.sub(lambda match: f"{match.group(1)}[REDACTED]", value)
+    return _SECRET_PATTERN.sub(lambda match: f"{match.group(1) or ''}[REDACTED]", value)
 
 
 def _response_details(error: BaseException) -> dict[str, Any] | None:

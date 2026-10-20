@@ -5,10 +5,13 @@ description = "Self-Correcting GraphRAG Knowledge Pipeline with Autonomous Entit
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "langchain-community==0.4.1",
     "neo4j>=5.24,<6",
     "neo4j-graphrag[ollama,openai]>=1.21,<2",
     "pydantic>=2.8,<3",
     "python-dotenv>=1.0,<2",
+    "ragas==0.4.3",
+    "tiktoken>=0.8,<1",
     "tqdm>=4.66,<5",
 ]
 
@@ -19,6 +22,7 @@ dev = [
 
 [project.scripts]
 graphrag-query = "graphrag_pipeline.query_command:main"
+graphrag-eval = "graphrag_pipeline.evaluation.command:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

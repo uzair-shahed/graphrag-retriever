@@ -253,20 +253,29 @@ def collect_selected_requests(
     dead_letters: list[dict[str, Any]] = []
     checksums: dict[Path, str] = {}
 
+    # A selected evaluation cohort can contain the full dev split. Read each
+    # source once rather than reopening/scanning it for every selected record.
+    wanted: dict[Path, set[int]] = {}
+    for selected in selected_requests:
+        if selected.origin != "musique" or not selected.source_file or selected.source_line is None:
+            raise ValueError("preload requires MuSiQue source_file and source_line provenance")
+        wanted.setdefault(Path(selected.source_file), set()).add(selected.source_line)
+    selected_lines: dict[tuple[Path, int], str] = {}
+    for path, lines in wanted.items():
+        checksums[path] = compute_file_sha256(path)
+        with path.open("r", encoding="utf-8") as handle:
+            for line_number, candidate in enumerate(handle, start=1):
+                if line_number in lines:
+                    selected_lines[(path, line_number)] = candidate.strip()
+                if line_number >= max(lines):
+                    break
+
     for selected in selected_requests:
         if selected.origin != "musique" or not selected.source_file or selected.source_line is None:
             raise ValueError("preload requires MuSiQue source_file and source_line provenance")
 
         path = Path(selected.source_file)
-        if path not in checksums:
-            checksums[path] = compute_file_sha256(path)
-
-        raw_line: str | None = None
-        with path.open("r", encoding="utf-8") as handle:
-            for line_number, candidate in enumerate(handle, start=1):
-                if line_number == selected.source_line:
-                    raw_line = candidate.strip()
-                    break
+        raw_line = selected_lines.get((path, selected.source_line))
 
         if raw_line is None or not raw_line:
             dead_letters.append(

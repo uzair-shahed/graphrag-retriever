@@ -19,17 +19,17 @@ Caveats:
     intentionally does not pass MuSiQue gold labels, supporting-fact labels, or
     decomposition fields to the provider. Provider output is parsed strictly
     except that one surrounding markdown code fence is accepted. The model
-    cannot declare insufficient evidence itself; ``insufficient_evidence`` is
-    only produced when retrieval returns no evidence.
+    can explicitly abstain with ``insufficient_evidence`` while preserving
+    retrieved evidence. Older successful two-field output remains accepted.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, model_validator
 from neo4j_graphrag.llm import OpenAILLM
 
 from graphrag_pipeline.answer_context import ANSWER_PROMPT_TEMPLATE, render_evidence_context
@@ -48,8 +48,17 @@ class GeneratedAnswer(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    answer: StrictStr = Field(min_length=1)
-    citations: list[StrictStr] = Field(min_length=1)
+    status: Literal["answered", "insufficient_evidence"] = "answered"
+    answer: StrictStr | None = Field(min_length=1)
+    citations: list[StrictStr]
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> "GeneratedAnswer":
+        if self.status == "answered" and (self.answer is None or not self.citations):
+            raise ValueError("answered output requires an answer and citations")
+        if self.status == "insufficient_evidence" and (self.answer is not None or self.citations):
+            raise ValueError("abstention requires null answer and empty citations")
+        return self
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,7 @@ def build_answer_llm(
         return OpenAILLM(
             model_name=model_settings.llm_model,
             model_params={
+                "temperature": 0,
                 "reasoning_effort": "none",
                 "max_tokens": model_settings.llm_max_tokens,
                 "extra_body": {
@@ -96,7 +106,7 @@ def build_answer_llm(
     return OllamaJSONSchemaLLM(
         model_name=model_settings.llm_model,
         response_model=GeneratedAnswer,
-        model_params={"options": {"temperature": 0}},
+        model_params={"options": {"temperature": 0, "num_predict": model_settings.llm_max_tokens}},
         host=model_settings.host,
     )
 
@@ -154,7 +164,7 @@ def validate_generated_answer(raw_response: Any, evidence: list[EvidenceChunk]) 
             or any citation that is not a chunk ID in ``evidence``.
     """
     generated = _parse_provider_output(raw_response)
-    if not generated.answer.strip():
+    if generated.status == "answered" and not generated.answer.strip():
         raise AnswerGenerationError("answer provider returned an empty answer")
     evidence_ids = {item.chunk_id for item in evidence}
     invalid_citations = [citation for citation in generated.citations if citation not in evidence_ids]
@@ -212,7 +222,7 @@ def generate_answer(
         generated = validate_generated_answer(raw_response, evidence)
         return QueryResponse(
             **metadata,
-            status="succeeded",
+            status="succeeded" if generated.status == "answered" else "insufficient_evidence",
             answer=generated.answer,
             retrieval_mode=settings.retrieval_mode,
             evidence=evidence,
