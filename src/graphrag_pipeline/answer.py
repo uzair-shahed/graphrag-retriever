@@ -20,6 +20,7 @@ Caveats:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,10 +28,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError
 from neo4j_graphrag.llm import OllamaLLM, OpenAILLM
 
-from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings
+from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings, is_reasoning_model
 from graphrag_pipeline.diagnostics import save_invalid_llm_response
 from graphrag_pipeline.query import QueryResponse, QueryRequest
 from graphrag_pipeline.retrieval import RetrievalResult
+
+logger = logging.getLogger(__name__)
 
 
 class AnswerGenerationError(RuntimeError):
@@ -90,18 +93,36 @@ def build_answer_llm(
         A synchronous GraphRAG LLM wrapper with ``invoke``.
     """
     if isinstance(model_settings, OpenRouterSettings):
+        provider_dict: dict[str, Any] = {
+            "require_parameters": model_settings.require_parameters,
+            "allow_fallbacks": model_settings.allow_fallbacks,
+        }
+        if model_settings.provider_order:
+            provider_dict["order"] = model_settings.provider_order
+
+        model_params: dict[str, Any] = {
+            "temperature": model_settings.temperature,
+            "max_tokens": model_settings.llm_max_tokens,
+            "extra_body": {
+                "provider": provider_dict,
+            },
+        }
+        if model_settings.seed is not None:
+            model_params["seed"] = model_settings.seed
+        if is_reasoning_model(model_settings.llm_model):
+            model_params["reasoning_effort"] = "none"
+
+        logger.info(
+            "Configured answer OpenAILLM: model=%s, profile=%s, temp=%s, seed=%s, provider_order=%s",
+            model_settings.llm_model,
+            model_settings.profile,
+            model_settings.temperature,
+            model_settings.seed,
+            model_settings.provider_order,
+        )
         return OpenAILLM(
             model_name=model_settings.llm_model,
-            model_params={
-                "reasoning_effort": "none",
-                "max_tokens": model_settings.llm_max_tokens,
-                "extra_body": {
-                    "provider": {
-                        "require_parameters": model_settings.require_parameters,
-                        "allow_fallbacks": model_settings.allow_fallbacks,
-                    }
-                },
-            },
+            model_params=model_params,
             base_url=model_settings.base_url,
             api_key=model_settings.api_key,
         )

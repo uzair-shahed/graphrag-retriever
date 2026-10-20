@@ -79,7 +79,11 @@ def test_pipeline_factory_uses_minimal_fixture_configuration() -> None:
         assert llm.model_params["extra_body"]["provider"] == {
             "require_parameters": True,
             "allow_fallbacks": True,
+            "order": ["openai"],
         }
+        assert llm.model_params["temperature"] == 0.0
+        assert llm.model_params["seed"] == 20261018
+        assert "reasoning_effort" not in llm.model_params
         assert pipeline.runner.config.from_file is False
         assert pipeline.runner.config.on_error.value == "RAISE"
         assert pipeline.runner.config.perform_entity_resolution is False

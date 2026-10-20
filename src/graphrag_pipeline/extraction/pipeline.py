@@ -11,6 +11,9 @@ while model and embedding API calls begin only when extraction runs.
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from neo4j import Driver
 from neo4j_graphrag.components.text_splitters.fixed_size_splitter import FixedSizeSplitter
 from neo4j_graphrag.embeddings.ollama import OllamaEmbeddings
@@ -19,8 +22,15 @@ from neo4j_graphrag.experimental.pipeline.kg_builder import SimpleKGPipeline
 from neo4j_graphrag.llm import OllamaLLM
 from neo4j_graphrag.llm import OpenAILLM
 
-from graphrag_pipeline.config import OllamaSettings, OpenRouterSettings, model_settings_from_env
+from graphrag_pipeline.config import (
+    OllamaSettings,
+    OpenRouterSettings,
+    is_reasoning_model,
+    model_settings_from_env,
+)
 from graphrag_pipeline.extraction.debug_llm import DebuggableOpenAILLM
+
+logger = logging.getLogger(__name__)
 
 
 class GraphWriteError(RuntimeError):
@@ -88,19 +98,36 @@ def build_simple_kg_pipeline(
     settings = settings or model_settings_from_env()
     if isinstance(settings, OpenRouterSettings):
         client_kwargs = {"api_key": settings.api_key, "base_url": settings.base_url}
+        provider_dict: dict[str, Any] = {
+            "require_parameters": settings.require_parameters,
+            "allow_fallbacks": settings.allow_fallbacks,
+        }
+        if settings.provider_order:
+            provider_dict["order"] = settings.provider_order
+
+        model_params: dict[str, Any] = {
+            "temperature": settings.temperature,
+            "max_tokens": settings.llm_max_tokens,
+            "extra_body": {
+                "provider": provider_dict,
+            },
+        }
+        if settings.seed is not None:
+            model_params["seed"] = settings.seed
+        if is_reasoning_model(settings.llm_model):
+            model_params["reasoning_effort"] = "none"
+
+        logger.info(
+            "Configured extraction OpenAILLM: model=%s, profile=%s, temp=%s, seed=%s, provider_order=%s",
+            settings.llm_model,
+            settings.profile,
+            settings.temperature,
+            settings.seed,
+            settings.provider_order,
+        )
         llm = DebuggableOpenAILLM(
             model_name=settings.llm_model,
-            model_params={
-                # "temperature": 0, # -- Must be disabled for some providers which do not support temperature
-                "reasoning_effort": "none", # -- This can be toggled depending on provider
-                "max_tokens": settings.llm_max_tokens,
-                "extra_body": {
-                    "provider": {
-                        "require_parameters": settings.require_parameters,
-                        "allow_fallbacks": settings.allow_fallbacks,
-                    },
-                },
-            },
+            model_params=model_params,
             base_url=settings.base_url,
             api_key=settings.api_key,
         )

@@ -9,6 +9,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+from graphrag_pipeline.answer import build_answer_llm
+from graphrag_pipeline.config import OpenRouterSettings
 from tools.model_gateway import (
     ModelGatewayHandler,
     canonical_request_hash,
@@ -129,4 +131,48 @@ def test_gateway_server_answer_wire_and_request_history() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_gateway_receives_experiment_and_demo_profile_requests() -> None:
+    """Gateway verifies temperature 0, seed, pinned provider, and no reasoning_effort for experiment."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ModelGatewayHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{port}"
+        with urllib.request.urlopen(f"{base_url}/requests/clear") as resp:
+            assert json.loads(resp.read().decode())["status"] == "cleared"
+
+        exp_settings = OpenRouterSettings(
+            api_key="fake-key",
+            base_url=f"{base_url}/v1",
+            llm_model="openai/gpt-4o-mini",
+            embedding_model="openai/text-embedding-3-small",
+            embedding_dimensions=1536,
+            llm_max_tokens=100,
+            require_parameters=True,
+            allow_fallbacks=False,
+            profile="experiment",
+            temperature=0.0,
+            seed=20261018,
+            provider_order=["openai"],
+        )
+        llm = build_answer_llm(exp_settings)
+        llm.invoke(input=[{"role": "user", "content": "Hello world"}])
+
+        with urllib.request.urlopen(f"{base_url}/requests") as resp:
+            history = json.loads(resp.read().decode())["requests"]
+            assert len(history) == 1
+            body = history[0]["body"]
+            assert body["temperature"] == 0.0
+            assert body["seed"] == 20261018
+            assert body["provider"]["order"] == ["openai"]
+            assert body["provider"]["allow_fallbacks"] is False
+            assert body["provider"]["require_parameters"] is True
+            assert "reasoning_effort" not in body
+    finally:
+        server.shutdown()
+        server.server_close()
+
 

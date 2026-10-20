@@ -224,6 +224,12 @@ def test_openai_llm_translates_answer_wire_to_strict_json_schema() -> None:
     schema = json_schema["schema"]
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == {"answer", "citations"}
+    assert create_kwargs["temperature"] == 0.0
+    assert create_kwargs["seed"] == 20261018
+    assert create_kwargs["extra_body"]["provider"]["order"] == ["openai"]
+    assert create_kwargs["extra_body"]["provider"]["allow_fallbacks"] is False
+    assert create_kwargs["extra_body"]["provider"]["require_parameters"] is True
+    assert "reasoning_effort" not in create_kwargs
 
 
 def test_ollama_llm_passes_format_option_without_openai_response_format() -> None:

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from graphrag_pipeline.config import Neo4jSettings, OllamaSettings, model_settings_from_env
+from graphrag_pipeline.config import (
+    Neo4jSettings,
+    OllamaSettings,
+    OpenRouterSettings,
+    is_reasoning_model,
+    model_settings_from_env,
+)
 
 
 def test_from_env_reads_required_and_default_values(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,3 +129,83 @@ def test_model_settings_from_env_rejects_unknown_provider(monkeypatch: pytest.Mo
 
     with pytest.raises(ValueError, match="GRAPH_RAG_PROVIDER"):
         model_settings_from_env()
+
+
+def test_openrouter_settings_default_experiment_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default profile is experiment with temperature 0, seed, pinned provider, and no fallbacks."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("OPENROUTER_LLM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_DIMENSIONS", "1536")
+    monkeypatch.delenv("GRAPH_RAG_PROFILE", raising=False)
+    monkeypatch.delenv("GRAPH_RAG_TEMPERATURE", raising=False)
+    monkeypatch.delenv("GRAPH_RAG_SEED", raising=False)
+    monkeypatch.delenv("OPENROUTER_PROVIDER_ORDER", raising=False)
+    monkeypatch.delenv("OPENROUTER_ALLOW_FALLBACKS", raising=False)
+
+    settings = OpenRouterSettings.from_env()
+
+    assert settings.profile == "experiment"
+    assert settings.temperature == 0.0
+    assert settings.seed == 20261018
+    assert settings.provider_order == ["openai"]
+    assert settings.allow_fallbacks is False
+    assert settings.require_parameters is True
+
+
+def test_openrouter_settings_demo_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Demo profile allows fallbacks, default temperature 0.7, and no pinned provider."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("OPENROUTER_LLM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_DIMENSIONS", "1536")
+    monkeypatch.setenv("GRAPH_RAG_PROFILE", "demo")
+    monkeypatch.delenv("GRAPH_RAG_TEMPERATURE", raising=False)
+    monkeypatch.delenv("GRAPH_RAG_SEED", raising=False)
+    monkeypatch.delenv("OPENROUTER_PROVIDER_ORDER", raising=False)
+    monkeypatch.delenv("OPENROUTER_ALLOW_FALLBACKS", raising=False)
+
+    settings = OpenRouterSettings.from_env()
+
+    assert settings.profile == "demo"
+    assert settings.temperature == 0.7
+    assert settings.seed is None
+    assert settings.provider_order is None
+    assert settings.allow_fallbacks is True
+
+
+def test_openrouter_settings_explicit_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit environment variables override profile defaults."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    monkeypatch.setenv("OPENROUTER_LLM_MODEL", "openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_MODEL", "openai/text-embedding-3-small")
+    monkeypatch.setenv("OPENROUTER_EMBEDDING_DIMENSIONS", "1536")
+    monkeypatch.setenv("GRAPH_RAG_PROFILE", "experiment")
+    monkeypatch.setenv("GRAPH_RAG_TEMPERATURE", "0.2")
+    monkeypatch.setenv("GRAPH_RAG_SEED", "42")
+    monkeypatch.setenv("OPENROUTER_PROVIDER_ORDER", "anthropic, openai")
+    monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", "true")
+
+    settings = OpenRouterSettings.from_env()
+
+    assert settings.temperature == 0.2
+    assert settings.seed == 42
+    assert settings.provider_order == ["anthropic", "openai"]
+    assert settings.allow_fallbacks is True
+
+
+def test_is_reasoning_model_detection() -> None:
+    """Reasoning models (o1, o3, deepseek-r1) are detected; others are not."""
+    assert is_reasoning_model("openai/o1-mini") is True
+    assert is_reasoning_model("openai/o1-preview") is True
+    assert is_reasoning_model("openai/o3-mini") is True
+    assert is_reasoning_model("deepseek/deepseek-r1") is True
+    assert is_reasoning_model("deepseek/deepseek-reasoner") is True
+    assert is_reasoning_model("openai/gpt-4o-mini") is False
+    assert is_reasoning_model("openai/gpt-4o") is False
+    assert is_reasoning_model("anthropic/claude-3.5-sonnet") is False
+    assert is_reasoning_model("qwen3:4b") is False
+

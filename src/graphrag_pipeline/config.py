@@ -8,7 +8,7 @@ parsing only; it does not open any connections.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -126,6 +126,12 @@ class Neo4jSettings:
         )
 
 
+def is_reasoning_model(model_name: str) -> bool:
+    """Check if model_name is an OpenAI/OpenRouter reasoning model."""
+    name = model_name.lower().split("/")[-1]
+    return name.startswith(("o1", "o3", "deepseek-r1", "deepseek-reasoner"))
+
+
 @dataclass(frozen=True)
 class OpenRouterSettings:
     """OpenRouter settings for the OpenAI-compatible GraphRAG providers."""
@@ -140,6 +146,10 @@ class OpenRouterSettings:
     allow_fallbacks: bool
     chunk_size: int = 10000
     chunk_overlap: int = 0
+    profile: str = "experiment"
+    temperature: float = 0.0
+    seed: int | None = 20261018
+    provider_order: list[str] | None = field(default_factory=lambda: ["openai"])
 
     @classmethod
     def from_env(cls) -> "OpenRouterSettings":
@@ -164,6 +174,38 @@ class OpenRouterSettings:
             raise ValueError("OPENROUTER_EMBEDDING_DIMENSIONS must be a positive integer.")
         chunk_size, chunk_overlap = _get_chunk_settings()
 
+        profile = os.environ.get("GRAPH_RAG_PROFILE", "experiment").strip().lower()
+        if profile not in {"experiment", "demo"}:
+            raise ValueError(
+                f"GRAPH_RAG_PROFILE must be 'experiment' or 'demo', got {profile!r}."
+            )
+
+        default_temp = 0.0 if profile == "experiment" else 0.7
+        temperature = _get_float_env("GRAPH_RAG_TEMPERATURE", default_temp)
+
+        raw_seed = os.environ.get("GRAPH_RAG_SEED")
+        if raw_seed is not None and raw_seed.strip():
+            try:
+                seed: int | None = int(raw_seed)
+            except ValueError as error:
+                raise ValueError(
+                    f"GRAPH_RAG_SEED must be an integer, got {raw_seed!r}."
+                ) from error
+        else:
+            seed = 20261018 if profile == "experiment" else None
+
+        raw_order = os.environ.get("OPENROUTER_PROVIDER_ORDER")
+        if raw_order is not None and raw_order.strip():
+            provider_order: list[str] | None = [
+                p.strip() for p in raw_order.split(",") if p.strip()
+            ]
+        else:
+            provider_order = ["openai"] if profile == "experiment" else None
+
+        default_fallbacks = False if profile == "experiment" else True
+        allow_fallbacks = _get_bool_env("OPENROUTER_ALLOW_FALLBACKS", default_fallbacks)
+        require_parameters = _get_bool_env("OPENROUTER_REQUIRE_PARAMETERS", True)
+
         return cls(
             api_key=api_key,
             base_url=base_url.rstrip("/"),
@@ -171,10 +213,14 @@ class OpenRouterSettings:
             embedding_model=embedding_model,
             embedding_dimensions=embedding_dimensions,
             llm_max_tokens=_get_positive_int_env("OPENROUTER_LLM_MAX_TOKENS", 4096),
-            require_parameters=_get_bool_env("OPENROUTER_REQUIRE_PARAMETERS", True),
-            allow_fallbacks=_get_bool_env("OPENROUTER_ALLOW_FALLBACKS", True),
+            require_parameters=require_parameters,
+            allow_fallbacks=allow_fallbacks,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            profile=profile,
+            temperature=temperature,
+            seed=seed,
+            provider_order=provider_order,
         )
 
 
