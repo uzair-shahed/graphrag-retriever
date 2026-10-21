@@ -84,160 +84,123 @@ Use `uv run --locked graphrag-eval run --help` for command-line help or see the
 
 ## Standalone paragraph extraction benchmark
 
-`graphrag-extraction-benchmark` compares entity and relationship extraction on
-**150 individual MuSiQue paragraphs** using OpenRouter or Ollama. First generate
-model-produced gold with an explicitly selected OpenRouter reasoning model,
-then compare candidate models using deterministic entity/relation precision,
-recall and F1. It saves JSONL results and accesses no Neo4j or RAGAS services.
-These scores measure extraction quality as a proxy for possible GraphRAG impact.
+The benchmark compares extracted entities and relationships with saved gold using
+precision, recall and F1. Its v2 response schema contains mention IDs, entity
+names/types and directed relationship references/types. It requests no confidence
+or evidence spans. Paragraph text, identity and provenance are retained locally.
+The benchmark accesses no Neo4j or RAGAS services.
 
-The [complete benchmark reference and milestone record](agent-coordination/entity-extraction-benchmark/entity-extraction-benchmark.md)
-contains artifact formats, scoring rules, recovery details, tests and every
-flag. Run these commands from the repository root:
+The [complete benchmark reference](agent-coordination/entity-extraction-benchmark/entity-extraction-benchmark.md)
+covers migration, providers, scoring, resume, append and artifacts.
+
+### Reuse existing gold and candidate responses
+
+Let active runs finish, then convert their saved generations offline:
 
 ```sh
-uv sync --locked --extra dev
+uv run --locked graphrag-extraction-benchmark migrate --input runs/entity-extraction/gold-run-150 --output runs/entity-extraction/gold-run-180-v2 --dry-run
+uv run --locked graphrag-extraction-benchmark migrate --input runs/entity-extraction/gold-run-150 --output runs/entity-extraction/gold-run-180-v2
+uv run --locked graphrag-extraction-benchmark migrate --input runs/entity-extraction/qwen3-4b-instruct-aligned --gold runs/entity-extraction/gold-run-180-v2 --output runs/entity-extraction/qwen3-4b-instruct-v2
+uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-run-180-v2 --model ollama:qwen3:4b-instruct --ollama-think false --output runs/entity-extraction/qwen3-4b-instruct-v2 --resume
+```
+
+Conversion makes zero provider calls. It preserves originals and raw responses,
+recovers outputs rejected only for retired fields, and recalculates references
+and scores. All 180 saved gold responses pass structural validation after
+projection. Invalid references, malformed/incomplete or missing responses remain
+failures. The six previously skipped candidate paragraphs become pending; resume
+generates missing predictions only. Add --retry-failed to explicitly retry failures.
+Migration creates a checksummed audit with original settings/errors and preserves
+attempts, timing and usage/cost metadata. Generation-format counts distinguish
+legacy responses from new simplified generations. The old --evidence-offsets
+option has been removed. Existing v1 directories require migration before use.
+
+### New runs and reports
+
+```sh
 uv run --locked graphrag-extraction-benchmark --help
-uv run --locked graphrag-extraction-benchmark select
-```
-
-`select` previews the first 150 paragraphs in dataset/list order from
-`dataset/musique/data/data/musique_ans_v1.0_dev.jsonl`. It writes no artifacts and
-makes no service calls. Use `--paragraphs 3` for a smaller preview.
-
-### Generate and resume OpenRouter gold labels
-
-Set `OPENROUTER_API_KEY` in `.env` or your environment. Replace
-`YOUR_REASONING_MODEL_ID` with your chosen OpenRouter model ID supporting
-structured output and the requested reasoning effort. Model support is checked
-before generation. Start with a local preview, then generate the gold:
-
-```sh
-uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --dry-run
-uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150
-```
-
-Gold uses OpenRouter and requires an explicit enabled reasoning effort. Calls
-may incur charges. The default selection is 150 paragraphs; a separate smoke
-run can use `--paragraphs 2` and a different output directory.
-
-Resume with the same model, effort, budget and other settings:
-
-```sh
-uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --resume
-uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --resume --retry-failed
-```
-
-Resume skips saved attempts. `--retry-failed` also retries failures while
-preserving successful rows. Changed settings or source content require a new
-output directory. Candidate evaluation skips failed or missing gold labels and
-records their paragraph IDs and failure types in its report.
-
-To extend an existing 150-paragraph gold run to 180, repeat its settings and
-use **one** of these equivalent append selectors:
-
-```sh
-uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --additional-paragraphs 30
-uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --start-paragraph 151 --end-paragraph 180
-```
-
-Positions count individual paragraphs in source order and both range endpoints
-are inclusive. Append requires a fully attempted saved cohort and the same
-source/configuration. It preserves saved attempts and processes new paragraphs;
-add `--resume --retry-failed` to retry failures too. Use `--dry-run` to preview.
-After interruption, resume with the expanded total (`--paragraphs 180 --resume`)
-instead of appending another N. See the complete reference for recovery details.
-
-### Choose Ollama, OpenRouter, or both for candidates
-
-For a local candidate, start Ollama, install the chosen model and use its tag:
-
-```sh
-ollama pull qwen3:4b
+uv run --locked graphrag-extraction-benchmark select --paragraphs 150
+uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --paragraphs 150 --max-tokens 32768 --output runs/entity-extraction/gold-150
 uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-150 --model ollama:qwen3:4b --ollama-think false --output runs/entity-extraction/local-candidate
+uv run --locked graphrag-extraction-benchmark report --input runs/entity-extraction/local-candidate
 ```
 
-For a hosted candidate, use its OpenRouter model ID:
+Gold requires OPENROUTER_API_KEY; local Ollama candidates require the model to be
+available in Ollama. Process environment overrides .env. Provider/model choices
+and budgets are explicit. Source/model/prompt/schema settings must match on
+resume. Saved successful rows are never regenerated by resume or retry.
+Append supports additional-paragraphs or a contiguous inclusive range; extend
+gold first. Summaries report gold skips and pending/failed work separately.
 
-```sh
-uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-150 --model openrouter:openai/gpt-4o-mini --output runs/entity-extraction/hosted-candidate
+### Visualize model and reasoning comparisons
+
+Create an offline HTML report, four standalone SVG charts, and a machine-readable
+`comparison.json` from your saved format-v2 artifacts:
+
+```powershell
+uv run --locked graphrag-extraction-benchmark visualize --gold runs/entity-extraction/gold-run-180-v2 --run "Qwen-off=runs/entity-extraction/qwen3-4b-instruct-v2" --output runs/entity-extraction-reports/gpt-sol-qwen
 ```
 
-Repeat `--model` to compare several models against the same gold in one run:
+Open the output directory's `index.html` in a browser. Repeat `--run "LABEL=PATH"`
+for any number of candidate directories; all models within each directory are
+included separately. For example, after generating a separate reasoning-on run:
 
-```sh
-uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-150 --model ollama:qwen3:4b --model openrouter:openai/gpt-4o-mini --ollama-think false --output runs/entity-extraction/mixed-models
+```powershell
+uv run --locked graphrag-extraction-benchmark visualize --gold runs/entity-extraction/gold-run-180-v2 --run "Qwen-off=runs/entity-extraction/qwen3-4b-instruct-v2" --run "Qwen-on=runs/entity-extraction/qwen3-4b-instruct-thinking" --output runs/entity-extraction-reports/qwen-reasoning
 ```
 
-Only the first colon separates the provider from the model: `ollama:qwen3:4b`
-sends model `qwen3:4b` to Ollama. Models are examples; availability and parameter
-support depend on your endpoint. For reasoning-capable hosted candidates, add
-`--reasoning-effort medium` or another supported effort. Otherwise omit it to
-use the model default. Ollama accepts `--ollama-think default`, `true`, `false`,
-or a model-supported string. Use separate runs to compare the same model under
-different settings. Candidate runs support `--dry-run`, `--resume` and
-`--retry-failed` too. After extending the gold cohort, the same append selectors
-extend an existing candidate run, preserving frozen labels and scores for its
-previous paragraphs. Candidate resume uses its saved cohort size, including
-when the supplied gold cohort is larger.
+The report shows entity and directed-relation micro precision/recall/F1, exact
+TP/FP/FN totals, and paragraph extraction outcomes. Each completed reasoning-on
+run is compared with every completed reasoning-off run of the same provider/model;
+F1 changes are measured in percentage points. Repeated runs are not averaged.
+Reasoning settings come from manifests, regardless of the labels you supply:
+Ollama `think=false` and OpenRouter effort `none` mean off; enabled settings show
+their level. Omitted settings remain unspecified and are excluded from on/off
+pairs. Other configuration differences are listed alongside the comparisons.
 
-Each candidate receives title/text and the same structured schema, without gold
-labels. Per-paragraph and micro scores include failed predictions as empty sets.
-Only paragraphs with successful validated gold labels receive candidate calls.
-For 180 requested paragraphs with 130 failed gold extractions, each candidate
-compares the remaining 50. Summaries show `requested`, `comparable`, `skipped`,
-the `skipped_gold` list, and each model's `compared` count. Skipped gold does not
-count as candidate failure or pending work. If no usable gold remains, the run
-completes with zero comparisons and zero model calls; its zero metrics represent
-an empty scoring population.
+Every candidate must match the supplied gold's full cohort, fingerprint, frozen
+labels and gold skips. Legacy format-v1 directories must be migrated first.
+Metrics are recomputed from validated saved rows, without using `summary.json`,
+calling providers, or modifying input artifacts. Failed extractions count as
+empty predictions; pending paragraphs and skipped gold are excluded and clearly
+reported. Partial runs are charted but excluded from reasoning deltas. Migrated
+generation counts are shown so you can distinguish legacy and simplified output
+formats when interpreting experiments.
 
-Artifacts include `manifest.json`, `cohort.jsonl`, `gold.jsonl` or
-`predictions.jsonl`, and `summary.json`; candidate runs freeze a local gold copy
-and skip list for offline reporting. Resume requires the same gold snapshot.
-Use a new candidate output directory after repairing previously skipped gold.
+The HTML works offline and embeds its charts and SVG downloads. The four SVG
+files can also be used directly in documents or slides. Keep output directories
+separate from inputs. Repeating the command replaces only files owned by a prior
+visualizer report; unrelated output files are preserved and filename collisions
+are rejected. A successful visualization exits 0 even when candidates have saved
+failures or pending work; invalid/incompatible artifacts exit 2.
 
-### Offline summaries and all flags
+### Flags
 
-Regenerate a saved run's JSON summary without providers or the original dataset:
-
-```sh
-uv run --locked graphrag-extraction-benchmark report --input runs/entity-extraction/mixed-models
-```
-
-| Flag | Commands | Default / accepted values |
+| Flag | Commands | Meaning |
 | --- | --- | --- |
-| `--dataset-path PATH` | `select`, `gold` | MuSiQue dev JSONL path above. |
-| `--paragraphs N` | `select`, `gold` | `150`; positive paragraph count. |
-| `--additional-paragraphs N` | `gold`, `run` | Append the next N paragraphs; cannot combine with ranges or `--paragraphs`. |
-| `--start-paragraph S` | `gold`, `run` | First new 1-based paragraph position; must follow the saved cohort and requires `--end-paragraph`. |
-| `--end-paragraph E` | `gold`, `run` | Inclusive last paragraph position; requires `--start-paragraph`, E >= S. |
-| `--model MODEL` | `gold` | Required OpenRouter model ID. |
-| `--model PROVIDER:MODEL` | `run` | Required, repeatable; `ollama` or `openrouter`. |
-| `--reasoning-effort LEVEL` | `gold`, `run` | Required for gold: `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Optional for candidates, also allowing `none`; omitted uses model default. |
-| `--ollama-think VALUE` | `run` | `default`, `true`, `false`, or model-supported string. |
-| `--gold DIR` | `run` | Required gold run directory; failed/missing labels are skipped and reported. |
-| `--output DIR` | `gold`, `run` | Required new/empty directory, or matching existing run with `--resume`. |
-| `--max-tokens N` | `gold`, `run` | `16384`; positive output budget including reasoning where applicable. |
-| `--timeout SECONDS` | `gold`, `run` | `180`; positive finite per-request timeout. |
-| `--retries N` | `gold`, `run` | `2`; additional transient HTTP/transport retries. |
-| `--openrouter-base-url URL` | `gold`, `run` | `OPENROUTER_BASE_URL`, then `https://openrouter.ai/api/v1`. |
-| `--ollama-host URL` | `run` | `OLLAMA_HOST`, then `http://localhost:11434`; native API host. |
-| `--resume` | `gold`, `run` | Off; continue with matching source/configuration. |
-| `--retry-failed` | `gold`, `run` | Off; requires `--resume`. |
-| `--no-progress` | `gold`, `run` | Off; hide stderr progress. |
-| `--dry-run` | `gold`, `run` | Off; local preview without service access or writes. |
-| `--input DIR` | `report` | Required existing gold/candidate run. |
-| `-h`, `--help` | All | Show command help. |
-
-Provider/model choice is explicit in these commands. Existing
-`GRAPH_RAG_PROVIDER` and `RAGAS_PROVIDER` values do not select benchmark models.
-The CLI reads `.env` for endpoint/key configuration; no embedding settings are
-required. The module entry point is also available before reinstalling scripts:
-
-```sh
-.venv/bin/python -m graphrag_pipeline.extraction_benchmark.command --help
-uv run --locked python -m pytest tests/unit/test_extraction_benchmark.py tests/unit/test_extraction_benchmark_runtime.py -q
-```
+| `--dataset-path` | `select`, `gold` | Local MuSiQue JSONL input; defaults to the dev dataset. |
+| `--paragraphs` | `select`, `gold` | Positive exact prefix count; default 150. |
+| `--additional-paragraphs` | `gold`, `run` | Add the next N source positions to an existing fully attempted cohort. |
+| `--start-paragraph`, `--end-paragraph` | `gold`, `run` | Inclusive 1-based append range; start must follow the saved cohort. |
+| `--model` | `gold`, `run` | Required; gold uses a bare OpenRouter ID, candidates repeat provider:model. |
+| `--reasoning-effort` | `gold`, `run` | Required enabled effort for gold; optional for hosted candidates, also accepting none. |
+| `--ollama-think` | `run` | default, true, false, or a model-supported string. |
+| `--gold` | `run`, `migrate` | Gold directory; migration candidates require already converted v2 gold. |
+| `--output` | `gold`, `run`, `migrate` | Destination directory; migration always requires a separate new/empty directory. |
+| `--max-tokens` | `gold`, `run` | Positive output budget; default 16384. |
+| `--timeout` | `gold`, `run` | Positive finite HTTP timeout in seconds; default 180. |
+| `--retries` | `gold`, `run` | Additional transient HTTP/transport retries; default 2. |
+| `--openrouter-base-url` | `gold`, `run` | Override OPENROUTER_BASE_URL; default https://openrouter.ai/api/v1. |
+| `--ollama-host` | `run` | Override OLLAMA_HOST; default http://localhost:11434. |
+| `--resume` | `gold`, `run` | Continue compatible saved work, skipping completed attempts. |
+| `--retry-failed` | `gold`, `run` | With --resume, repeat failed attempts; successful rows stay skipped. |
+| `--no-progress` | `gold`, `run` | Hide stderr progress while keeping final JSON stdout. |
+| `--dry-run` | `gold`, `run`, `migrate` | Preview local validation without provider calls or artifact writes. |
+| `--input` | `report`, `migrate` | Saved run directory. |
+| `--run` | `visualize` | Repeat `LABEL=PATH` for each candidate run directory; labels and paths must be unique. |
+| `--gold` | `visualize` | Matching format-v2 gold directory for all candidate runs. |
+| `--output` | `visualize` | Separate HTML/SVG report directory; generated files can be refreshed safely. |
+| `-h`, `--help` | All | Command help. |
 
 ## Windows Quick Start
 
