@@ -13,5 +13,5 @@ agent-coordination/architecture-images/*
 __pycache__/
 .pytest_cache/
 debugging_logs/
-runs/
+!runs/entity-extraction/
 /.vscode/
