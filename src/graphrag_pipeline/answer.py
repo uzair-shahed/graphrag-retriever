@@ -59,7 +59,10 @@ class GeneratedAnswer(BaseModel):
 
 
 SYSTEM_ANSWER_INSTRUCTION = (
-    "Answer the question using only the graph evidence below. "
+    "Answer the question directly and concisely using only the graph evidence below. "
+    "Provide ONLY the shortest factual answer span (such as an entity name, person, location, "
+    "date, or number). Do NOT use full sentences, do NOT restate the question, and do NOT include "
+    "explanations in the answer. "
     "Return valid JSON with exactly two fields: answer (string) and "
     "citations (array of string identifiers). Every citation must identify "
     "evidence used in the answer matching the bracketed [id] labels. "

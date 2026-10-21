@@ -365,3 +365,13 @@ def test_generate_answer_unretrieved_citation_rejected_and_recorded() -> None:
     assert pred["predicted_support_idxs"] == []
 
 
+def test_system_answer_instruction_requests_shortest_span() -> None:
+    """Verify that the system instruction asks for the shortest answer span and forbids full sentences (Finding C2)."""
+    from graphrag_pipeline.answer import SYSTEM_ANSWER_INSTRUCTION
+
+    instr_lower = SYSTEM_ANSWER_INSTRUCTION.lower()
+    assert "shortest" in instr_lower
+    assert "span" in instr_lower
+    assert "not use full sentences" in instr_lower
+
+

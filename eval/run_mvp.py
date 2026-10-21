@@ -263,6 +263,8 @@ class ConditionResult:
     answer_f1_ci: tuple[float, float]
     answer_em: float
     answer_em_ci: tuple[float, float]
+    answer_containment: float
+    answer_containment_ci: tuple[float, float]
     support_f1: float
     support_f1_ci: tuple[float, float]
     r_at_2: float
@@ -419,6 +421,7 @@ def run_condition(
     # Compute genuine per-instance scores for bootstrap CIs
     answer_f1_list: list[float] = []
     answer_em_list: list[float] = []
+    answer_cont_list: list[float] = []
     support_f1_list: list[float] = []
 
     try:
@@ -431,6 +434,11 @@ def run_condition(
             em = float(metric_max_over_ground_truths(compute_exact, pred_ans, gold_ans))
             answer_f1_list.append(f1)
             answer_em_list.append(em)
+
+            # Secondary metric: gold answer contained in predicted text
+            p_lower = str(pred_ans).strip().lower()
+            contained = any(str(ga).strip().lower() in p_lower for ga in gold_ans if str(ga).strip())
+            answer_cont_list.append(1.0 if contained else 0.0)
 
             gold_sp = set(int(p["idx"]) for p in gold.get("paragraphs", []) if p.get("is_supporting"))
             pred_sp = set(int(idx) for idx in pred.get("predicted_support_idxs", []))
@@ -445,12 +453,14 @@ def run_condition(
         logger.warning("Could not import official per-instance metrics: %s. Using macro scores.", exc)
         answer_f1_list = [official_metrics.get("answer_f1", 0.0)] * len(records)
         answer_em_list = [official_metrics.get("answer_em", 0.0)] * len(records)
+        answer_cont_list = [0.0] * len(records)
         support_f1_list = [official_metrics.get("support_f1", 0.0)] * len(records)
 
     mean_r2 = sum(r_at_2_list) / len(r_at_2_list) if r_at_2_list else 0.0
     mean_r5 = sum(r_at_5_list) / len(r_at_5_list) if r_at_5_list else 0.0
     mean_later_r5 = sum(later_r_at_5_list) / len(later_r_at_5_list) if later_r_at_5_list else 0.0
     mean_lat = sum(latencies) / len(latencies) if latencies else 0.0
+    mean_cont = sum(answer_cont_list) / len(answer_cont_list) if answer_cont_list else 0.0
 
     return ConditionResult(
         condition=condition,
@@ -459,6 +469,8 @@ def run_condition(
         answer_f1_ci=bootstrap_ci(answer_f1_list),
         answer_em=round(official_metrics.get("answer_em", 0.0), 3),
         answer_em_ci=bootstrap_ci(answer_em_list),
+        answer_containment=round(mean_cont, 3),
+        answer_containment_ci=bootstrap_ci(answer_cont_list),
         support_f1=round(official_metrics.get("support_f1", 0.0), 3),
         support_f1_ci=bootstrap_ci(support_f1_list),
         r_at_2=round(mean_r2, 3),
@@ -487,20 +499,21 @@ def render_report(
         f"- **Split:** `{split}` (Evaluated Questions: {results[0].num_questions if results else 0})",
         "- **Evidence Budget:** Top 5 paragraphs (Seeds: 2, Fan-out: 2)",
         "",
-        "| Condition | Answer F1 (95% CI) | Answer EM (95% CI) | Support F1 (95% CI) | R@2 (95% CI) | R@5 (95% CI) | Later-hop R@5 (95% CI) | Latency (s) | Cost ($/q) |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        "| Condition | Answer F1 (95% CI) | Answer EM (95% CI) | Containment (95% CI) | Support F1 (95% CI) | R@2 (95% CI) | R@5 (95% CI) | Later-hop R@5 (95% CI) | Latency (s) | Cost ($/q) |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
     for r in results:
         f1_str = f"{r.answer_f1 * 100:.1f} [{r.answer_f1_ci[0] * 100:.1f}, {r.answer_f1_ci[1] * 100:.1f}]"
         em_str = f"{r.answer_em * 100:.1f} [{r.answer_em_ci[0] * 100:.1f}, {r.answer_em_ci[1] * 100:.1f}]"
+        cont_str = f"{r.answer_containment * 100:.1f} [{r.answer_containment_ci[0] * 100:.1f}, {r.answer_containment_ci[1] * 100:.1f}]"
         sf1_str = f"{r.support_f1 * 100:.1f} [{r.support_f1_ci[0] * 100:.1f}, {r.support_f1_ci[1] * 100:.1f}]"
         r2_str = f"{r.r_at_2 * 100:.1f} [{r.r_at_2_ci[0] * 100:.1f}, {r.r_at_2_ci[1] * 100:.1f}]"
         r5_str = f"{r.r_at_5 * 100:.1f} [{r.r_at_5_ci[0] * 100:.1f}, {r.r_at_5_ci[1] * 100:.1f}]"
         lr5_str = f"{r.later_hop_r_at_5 * 100:.1f} [{r.later_hop_r_at_5_ci[0] * 100:.1f}, {r.later_hop_r_at_5_ci[1] * 100:.1f}]"
         cost_str = f"${r.mean_cost_usd:.4f}" if r.mean_cost_usd is not None else "n/a"
         lines.append(
-            f"| `{r.condition}` | {f1_str} | {em_str} | {sf1_str} | {r2_str} | {r5_str} | {lr5_str} | {r.mean_latency_seconds:.2f} | {cost_str} |"
+            f"| `{r.condition}` | {f1_str} | {em_str} | {cont_str} | {sf1_str} | {r2_str} | {r5_str} | {lr5_str} | {r.mean_latency_seconds:.2f} | {cost_str} |"
         )
 
     lines.extend(
