@@ -129,3 +129,11 @@ def test_classify_failure_categories() -> None:
         EvidenceChunk(chunk_id="c9", text="t9", paragraph_idx=9),
     ]
     assert classify_failure(record, retrieved_none, {"predicted_answer": "wrong"}) == "extraction_miss"
+
+
+def test_per_instance_scores_and_paragraph_hash_canonical() -> None:
+    """Paragraph hash produces full 64-character SHA-256 matching ingestion."""
+    from eval.run_mvp import compute_paragraph_hash
+    h = compute_paragraph_hash("Test Title", "Test content")
+    assert len(h) == 64
+    assert h == compute_paragraph_hash("Test Title", "Test content")

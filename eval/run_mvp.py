@@ -52,10 +52,7 @@ from graphrag_pipeline.storage.neo4j_connection import Neo4jConnection
 logger = logging.getLogger(__name__)
 
 
-def compute_paragraph_hash(title: str, text: str) -> str:
-    """Generate deterministic SHA-256 paragraph hash matching ingestion."""
-    content = f"{title.strip()}\n{text.strip()}".encode("utf-8")
-    return hashlib.sha256(content).hexdigest()[:16]
+from graphrag_pipeline.ingestion.record_adapter import compute_paragraph_hash
 
 
 def classify_failure(
@@ -275,8 +272,22 @@ class ConditionResult:
     later_hop_r_at_5: float
     later_hop_r_at_5_ci: tuple[float, float]
     mean_latency_seconds: float
-    mean_cost_usd: float
-    predictions_path: str
+    mean_cost_usd: float | None = None
+    predictions_path: str = ""
+
+
+def _fetch_gateway_spend() -> float | None:
+    """Query model gateway spend endpoint if available."""
+    try:
+        import urllib.request
+        req = urllib.request.Request("http://127.0.0.1:8080/v1/models", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if "spent_usd" in data:
+                return float(data["spent_usd"])
+    except Exception:
+        pass
+    return None
 
 
 def run_condition(
@@ -290,7 +301,7 @@ def run_condition(
     seeds: int = 2,
     fanout: int = 2,
     output_dir: Path = Path("runs/mvp_results"),
-    fake_unit_cost: float = 0.001,
+    unit_cost_usd: float | None = None,
 ) -> ConditionResult:
     """Execute retrieval, answer generation, and evaluation for one condition."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -299,6 +310,8 @@ def run_condition(
     r_at_5_list: list[float] = []
     later_r_at_5_list: list[float] = []
     latencies: list[float] = []
+
+    spend_start = _fetch_gateway_spend()
 
     for rec in records:
         qid = rec["id"]
@@ -310,6 +323,8 @@ def run_condition(
             if len(decomp) > 1
             else set()
         )
+
+        q_start = time.perf_counter()
 
         # 1. Retrieval
         if condition == "bm25":
@@ -368,18 +383,27 @@ def run_condition(
             source_line=rec.get("source_line"),
         )
 
-        start_time = time.perf_counter()
         query_resp = generate_answer(
             request=query_req,
             retrieval=retrieval_res,
             llm=llm,
             answer_settings=AnswerSettings(retrieval_mode=condition, max_evidence_chunks=top_k),
         )
-        elapsed = time.perf_counter() - start_time
+        elapsed = time.perf_counter() - q_start
         latencies.append(elapsed)
 
         pred_dict = query_resp.to_prediction()
         predictions.append(pred_dict)
+
+    # Compute spend delta
+    spend_end = _fetch_gateway_spend()
+    if unit_cost_usd is not None:
+        mean_cost: float | None = unit_cost_usd
+    elif spend_start is not None and spend_end is not None:
+        delta = max(0.0, spend_end - spend_start)
+        mean_cost = round(delta / len(records), 5) if records else 0.0
+    else:
+        mean_cost = None
 
     # 3. Write predictions and evaluate
     pred_path = output_dir / f"predictions_{condition}.jsonl"
@@ -392,29 +416,33 @@ def run_condition(
 
     official_metrics = evaluate_predictions(pred_path, gold_path)
 
-    # Compute per-instance scores for bootstrap CIs
+    # Compute genuine per-instance scores for bootstrap CIs
     answer_f1_list: list[float] = []
     answer_em_list: list[float] = []
     support_f1_list: list[float] = []
 
-    # Import official token metric helpers for per-instance bootstrap CIs
     try:
-        from metrics.answer import compute_em, compute_f1
-        from metrics.support import compute_f1 as compute_sp_f1
+        from metrics.answer import compute_exact, compute_f1, metric_max_over_ground_truths
 
         for pred, gold in zip(predictions, records):
             gold_ans = [gold["answer"]] + gold.get("answer_aliases", [])
             pred_ans = pred.get("predicted_answer", "")
-            f1, em = compute_f1(pred_ans, gold_ans), compute_em(pred_ans, gold_ans)
+            f1 = float(metric_max_over_ground_truths(compute_f1, pred_ans, gold_ans))
+            em = float(metric_max_over_ground_truths(compute_exact, pred_ans, gold_ans))
             answer_f1_list.append(f1)
-            answer_em_list.append(float(em))
+            answer_em_list.append(em)
 
-            gold_sp = [p["idx"] for p in gold.get("paragraphs", []) if p.get("is_supporting")]
-            pred_sp = pred.get("predicted_support_idxs", [])
-            sp_f1 = compute_sp_f1(pred_sp, gold_sp)
-            support_f1_list.append(sp_f1)
-    except Exception:
-        # Fallback to macro scores if sub-metrics not imported
+            gold_sp = set(int(p["idx"]) for p in gold.get("paragraphs", []) if p.get("is_supporting"))
+            pred_sp = set(int(idx) for idx in pred.get("predicted_support_idxs", []))
+            tp = len(pred_sp & gold_sp)
+            prec = tp / len(pred_sp) if pred_sp else 0.0
+            rec = tp / len(gold_sp) if gold_sp else 0.0
+            sp_f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
+            if not pred_sp and not gold_sp:
+                sp_f1 = 1.0
+            support_f1_list.append(float(sp_f1))
+    except ImportError as exc:
+        logger.warning("Could not import official per-instance metrics: %s. Using macro scores.", exc)
         answer_f1_list = [official_metrics.get("answer_f1", 0.0)] * len(records)
         answer_em_list = [official_metrics.get("answer_em", 0.0)] * len(records)
         support_f1_list = [official_metrics.get("support_f1", 0.0)] * len(records)
@@ -440,7 +468,7 @@ def run_condition(
         later_hop_r_at_5=round(mean_later_r5, 3),
         later_hop_r_at_5_ci=bootstrap_ci(later_r_at_5_list),
         mean_latency_seconds=round(mean_lat, 3),
-        mean_cost_usd=round(fake_unit_cost, 4),
+        mean_cost_usd=mean_cost,
         predictions_path=str(pred_path),
     )
 
@@ -470,8 +498,9 @@ def render_report(
         r2_str = f"{r.r_at_2 * 100:.1f} [{r.r_at_2_ci[0] * 100:.1f}, {r.r_at_2_ci[1] * 100:.1f}]"
         r5_str = f"{r.r_at_5 * 100:.1f} [{r.r_at_5_ci[0] * 100:.1f}, {r.r_at_5_ci[1] * 100:.1f}]"
         lr5_str = f"{r.later_hop_r_at_5 * 100:.1f} [{r.later_hop_r_at_5_ci[0] * 100:.1f}, {r.later_hop_r_at_5_ci[1] * 100:.1f}]"
+        cost_str = f"${r.mean_cost_usd:.4f}" if r.mean_cost_usd is not None else "n/a"
         lines.append(
-            f"| `{r.condition}` | {f1_str} | {em_str} | {sf1_str} | {r2_str} | {r5_str} | {lr5_str} | {r.mean_latency_seconds:.2f} | ${r.mean_cost_usd:.4f} |"
+            f"| `{r.condition}` | {f1_str} | {em_str} | {sf1_str} | {r2_str} | {r5_str} | {lr5_str} | {r.mean_latency_seconds:.2f} | {cost_str} |"
         )
 
     lines.extend(
