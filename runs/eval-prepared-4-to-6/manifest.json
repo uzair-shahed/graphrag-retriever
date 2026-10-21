@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "run_id": "54455cb4-d5f1-4bdf-9dcc-dc938d62c972",
+  "status": "completed",
+  "dataset": "dataset\\musique\\data\\data\\musique_ans_v1.0_dev.jsonl",
+  "dataset_sha256": "15fa63794d18a94ce12411aca6e2327e65b6e83b0b1490efab3f1962e48abf3b",
+  "selected_records": [
+    {
+      "id": "2hop__259228_793698",
+      "source_line": 4
+    },
+    {
+      "id": "2hop__481349_302087",
+      "source_line": 5
+    },
+    {
+      "id": "2hop__697790_864352",
+      "source_line": 6
+    }
+  ],
+  "settings": {
+    "top_k": 5,
+    "max_context_chunks": 5,
+    "max_context_tokens": 4096,
+    "max_graph_nodes": 200,
+    "conditions": [
+      "record",
+      "corpus"
+    ]
+  },
+  "configuration": {
+    "retrieval_models": {
+      "host": "http://localhost:11434",
+      "llm_model": "qwen3:4b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "chunk_size": 10000,
+      "chunk_overlap": 0,
+      "request_timeout_seconds": 120,
+      "llm_max_tokens": 4096
+    },
+    "answer_models": {
+      "host": "http://localhost:11434",
+      "llm_model": "qwen3:4b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "chunk_size": 10000,
+      "chunk_overlap": 0,
+      "request_timeout_seconds": 120,
+      "llm_max_tokens": 4096
+    },
+    "evaluator": {
+      "provider": "ollama",
+      "llm_model": "qwen3:4b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "base_url": "http://localhost:11434/v1",
+      "max_tokens": 4096,
+      "timeout": 180.0,
+      "retries": 2
+    },
+    "index": {
+      "name": "chunk_embedding",
+      "label": "Chunk",
+      "embedding_property": "embedding",
+      "dimensions": 786,
+      "similarity": "cosine",
+      "filter_property": "record_id"
+    },
+    "neo4j_database": "neo4j",
+    "query_policy": "original question only; no title hints or gold decomposition",
+    "answer_policy": "shared generator and validator for vector and graph-expanded evidence"
+  },
+  "versions": {
+    "ragas": "0.4.3",
+    "neo4j-graphrag": "1.21.0",
+    "neo4j": "5.28.7",
+    "tiktoken": "0.14.0"
+  },
+  "context_tokenizer": "cl100k_base (comparison proxy; not the answer model's native tokenizer)",
+  "snapshot_before": {
+    "sha256": "50bcfc3ea9875e5717bb7c4ee811a3a887803b894895e10a1f99a9920ba63afe",
+    "nodes": 83786,
+    "relationships": 113071,
+    "indexes": 7311
+  },
+  "snapshot_after": {
+    "sha256": "50bcfc3ea9875e5717bb7c4ee811a3a887803b894895e10a1f99a9920ba63afe",
+    "nodes": 83786,
+    "relationships": 113071,
+    "indexes": 7311
+  },
+  "snapshot_consistent": true
+}

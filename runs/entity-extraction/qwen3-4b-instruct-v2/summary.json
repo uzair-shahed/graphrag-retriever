@@ -1,0 +1,45 @@
+{
+  "format_version": 2,
+  "kind": "candidate",
+  "run_id": "70ab7c769566452881a97507b17bb0d2",
+  "complete": true,
+  "successful": false,
+  "score_population": "completed candidate rows with usable gold, including failed extractions as empty predictions; pending rows and skipped gold not scored",
+  "models": {
+    "ollama:qwen3:4b-instruct": {
+      "expected": 180,
+      "attempted": 180,
+      "succeeded": 179,
+      "failed": 1,
+      "pending": 0,
+      "elapsed_seconds": 3814.0617504999364,
+      "generation_formats": {
+        "legacy_v1": 171,
+        "simplified_v2": 9
+      },
+      "compared": 180,
+      "micro": {
+        "entities": {
+          "tp": 993,
+          "fp": 1032,
+          "fn": 2315,
+          "precision": 0.49037037037037035,
+          "recall": 0.3001813784764208,
+          "f1": 0.37239827489218075
+        },
+        "relations": {
+          "tp": 70,
+          "fp": 1441,
+          "fn": 3432,
+          "precision": 0.04632693580410324,
+          "recall": 0.019988577955454025,
+          "f1": 0.027927388789148213
+        }
+      }
+    }
+  },
+  "requested": 180,
+  "comparable": 180,
+  "skipped": 0,
+  "skipped_gold": []
+}

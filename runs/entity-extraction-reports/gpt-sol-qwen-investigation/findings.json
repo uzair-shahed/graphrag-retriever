@@ -1,0 +1,246 @@
+{
+  "date": "2026-10-21",
+  "proposals": [
+    {
+      "id": "F1",
+      "title": "Keep strict scores; add complementary diagnostic metrics",
+      "effort": "Hours to 1 day; prototype delivered in this report",
+      "gain": "No intrinsic extraction gain; much clearer measurement",
+      "ease": 1,
+      "impact": null,
+      "value": null,
+      "professional": 7,
+      "academic": 3,
+      "action": "Expose strict typed, untyped surface, relation label, and endpoint-pair scores side by side in the reusable visualizer. Add macro/per-record summaries and a separate human-supported-fact measure. Preserve the original scorer and baseline scores.",
+      "integrity": "Version every supplementary metric. Freeze any alias mapping or overlap rule on a disjoint development set; apply identical rules to every candidate and the reference.",
+      "basis": "Measured here: entity F1 37.24% versus 59.03% untyped; relation F1 2.79% versus 21.57% for directed endpoint pairs. These measure different tasks."
+    },
+    {
+      "id": "F2",
+      "title": "Use a verified dual-mode checkpoint for the reasoning experiment",
+      "effort": "About 1 day after decoding metadata is configurable",
+      "gain": "Repairs experimental validity; reasoning's quality effect is unknown",
+      "ease": 5,
+      "impact": null,
+      "value": null,
+      "professional": 6,
+      "academic": 1,
+      "action": "Use the installed qwen3:8b for paired think=false/true runs after confirming its digest and both thinking controls. Pin identical weights, quantization, prompts, schema, context and sampling settings. Save whether a thinking field was returned and its token usage.",
+      "integrity": "Keep the current 4B Instruct result as a separate baseline. Do not compare the installed 4B Instruct and 4B Thinking checkpoints as if only a flag changed. Use fresh directories and a fixed budget/retry policy.",
+      "basis": "Live metadata identifies Instruct-2507 for 4b-instruct, Thinking-2507 for 4b, and [false,true] controls for 8b; historical digests were not saved. S1-S3, S13."
+    },
+    {
+      "id": "F3",
+      "title": "Define an ontology, annotation guidelines and disjoint few-shot examples",
+      "effort": "1-3 days plus annotation work",
+      "gain": "High potential for consistent types, directions and predicates; unmeasured",
+      "ease": 6,
+      "impact": 3,
+      "value": 1,
+      "professional": 2,
+      "academic": 4,
+      "action": "Define allowed entity types, relation IDs, inverse/direction rules, boundaries, generic concepts, negation and coreference policy. Supply concise definitions and 3-5 examples from independent development documents. Constrain relation/type labels in JSON schema once the task specification is fixed.",
+      "integrity": "An ontology changes the task: create a versioned reference and rerun all systems. Do not retrospectively relabel only Qwen disagreements or import all test gold labels into its prompt. Keep the current open-label result intact.",
+      "basis": "395 gold type strings and 1,368 gold relation strings over 180 paragraphs; 574 shared-surface type disagreements. Guidelines are supported by GoLLIE, not a quantified promise here (S6)."
+    },
+    {
+      "id": "F4",
+      "title": "Separate entity detection from grounded relation classification",
+      "effort": "2-4 days",
+      "gain": "High potential; reduces endpoint and scope mistakes",
+      "ease": 7,
+      "impact": 2,
+      "value": 4,
+      "professional": 3,
+      "academic": 8,
+      "action": "First extract a source-grounded entity inventory with stable IDs. Then classify supported relations among those predicted entities, allowing no_relation and preserving evidence, negation and direction. Validate endpoints and return unknown when unsupported. Evaluate the full pipeline and the relation stage separately.",
+      "integrity": "Use predicted entities in the production benchmark. A run given gold entities is an oracle diagnostic and must be labeled separately. Apply identical stages to both reasoning conditions and rerun in new directories.",
+      "basis": "Only 1,757/3,437 gold directed surface pairs have both entity surfaces present in Qwen, and 501/3,437 have both types aligned. This is observed availability, not a universal recovery ceiling."
+    },
+    {
+      "id": "F5",
+      "title": "Add a stronger model baseline under the same protocol",
+      "effort": "Hours to 1 day; 8B already installed",
+      "gain": "Medium-high potential, not guaranteed",
+      "ease": 2,
+      "impact": 4,
+      "value": 3,
+      "professional": 5,
+      "academic": 6,
+      "action": "Evaluate the installed qwen3:8b off/on, then consider a larger local or independent hosted extractor if resources allow. Hold the reference and selected protocol fixed and record latency, token usage and hardware/quantization.",
+      "integrity": "A checkpoint/capacity comparison is a separate factor from reasoning. Do not use the same model-generated reference as a perfect truth score for its author. Human adjudication is needed for absolute factual quality.",
+      "basis": "Concrete errors remain after ignoring labels. No larger extractor was run in this investigation; the expected benefit is a hypothesis (S2)."
+    },
+    {
+      "id": "F6",
+      "title": "Create an independent human-reviewed reference version",
+      "effort": "Several days to 2 weeks for full double review",
+      "gain": "High validity improvement; no intrinsic change to candidate extractions",
+      "ease": 9,
+      "impact": null,
+      "value": null,
+      "professional": 1,
+      "academic": 2,
+      "action": "Have two annotators independently label a new stratified reference, blind to system names, using frozen guidelines; adjudicate disagreements. Include ordinary passages, infobox-like text, ambiguity and negation. Review at least 4 paragraphs per current record as a pilot, then all 180 if reused for descriptive analysis.",
+      "integrity": "Save human-v1 separately, retaining all original silver labels and changes with reasons. Use an untouched document-group holdout for confirmatory claims; this inspected cohort is exploratory. Annotate recall independently, not just the union of proposed system triples.",
+      "basis": "The current reference is a single model's unreviewed annotation. All 3,589 raw gold mentions occur in the source body, but this does not establish semantic correctness or completeness. S8 motivates independent review, not a claimed local error rate."
+    },
+    {
+      "id": "F7",
+      "title": "Benchmark a GLiNER + GLiREL extraction pipeline",
+      "effort": "2-5 days including adapters and development checks",
+      "gain": "Medium-high potential; ontology and domain dependent",
+      "ease": 8,
+      "impact": 5,
+      "value": 5,
+      "professional": 8,
+      "academic": 7,
+      "action": "Use GLiNER for entity spans/types and GLiREL for relations given the predicted entities. Adapt outputs to the same benchmark contract and predefined ontology. Tune confidence cutoffs on development data only, then evaluate end to end on the same held-out passages.",
+      "integrity": "Specialized NER may omit abstract concepts expected by this broad prompt. Align the task specification first; do not silently exclude unsupported categories or compare only a favorable subset.",
+      "basis": "These methods are supported on their authors' NER and relation-classification benchmarks, not demonstrated better on this corpus (S4-S5)."
+    },
+    {
+      "id": "F8",
+      "title": "Expose, pin and tune decoding/context on development data",
+      "effort": "1-2 days",
+      "gain": "Low-medium potential; also improves reproducibility",
+      "ease": 4,
+      "impact": 6,
+      "value": 2,
+      "professional": 4,
+      "academic": 5,
+      "action": "Add manifest-validated temperature, top_p, top_k, seed and num_ctx options. Compare the existing temperature=0 protocol with a fixed sampled profile on disjoint development text. The Instruct card suggests 0.7/0.8/20; hybrid thinking guidance suggests a different profile. Select one shared profile for a causal on/off experiment and run 3-5 seeds.",
+      "integrity": "Freeze a shared context/output/retry policy across paired modes. Label model-optimized profiles as a separate pragmatic comparison. The code's zero-temperature request and observed repetition motivate a test, not a proven decoding diagnosis.",
+      "basis": "Current provider code overrides Ollama's model temperature with 0 and does not pin num_ctx or seeds. Model context maximum is not evidence of allocated runtime context (S1-S3, S12)."
+    },
+    {
+      "id": "F9",
+      "title": "Task-adapt an extractor with LoRA on separate annotated training data",
+      "effort": "1-3 weeks plus training/evaluation resources",
+      "gain": "High ceiling but highly uncertain; data dependent",
+      "ease": 10,
+      "impact": 1,
+      "value": 7,
+      "professional": 10,
+      "academic": 9,
+      "action": "Fine-tune on document-disjoint, quality-checked examples with the frozen extraction ontology. Include hard negatives, direction, negation, sparse and dense passages. Compare against the unchanged base model and specialized baselines on held-out documents.",
+      "integrity": "Never train on these 180 evaluation paragraphs, their answers, or paraphrases. Group splits by source article/document, not only question ID. Teacher-generated training data can transfer teacher style and errors; independent human evaluation remains necessary.",
+      "basis": "LoRA reduces adaptation cost; no data or experiment here supports a numerical gain or an optimal dataset size (S9)."
+    },
+    {
+      "id": "F10",
+      "title": "Evaluate deterministic invalid-output recovery as a separate condition",
+      "effort": "Hours to 1 day",
+      "gain": "Small bounded effect on this run",
+      "ease": 3,
+      "impact": 7,
+      "value": 6,
+      "professional": 9,
+      "academic": 10,
+      "action": "In a versioned postprocessing arm, retain valid mentions and reject only dangling triples when IDs cannot be resolved without guessing. Report raw validity, dropped items and recovered scores for every model using the same rule.",
+      "integrity": "Keep strict raw-output scoring primary. Do not silently repair labels, invent IDs, drop difficult paragraphs or selectively retry Qwen. Preserve an audit of all original and postprocessed outputs.",
+      "basis": "The sole remaining failed paragraph references nonexistent M20. Even perfect replacement would reach only 38.45% entity and 4.08% relation F1, so schema recovery cannot explain most of the weak score."
+    }
+  ],
+  "sources": [
+    [
+      "S1",
+      "Qwen3-4B-Instruct-2507 official model card",
+      "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507",
+      "Identifies the non-thinking-only checkpoint and recommends sampling settings."
+    ],
+    [
+      "S2",
+      "Qwen3-8B official model card",
+      "https://huggingface.co/Qwen/Qwen3-8B",
+      "Documents both thinking and non-thinking modes for the same model, with decoding guidance."
+    ],
+    [
+      "S3",
+      "Ollama thinking controls",
+      "https://docs.ollama.com/capabilities/thinking",
+      "Documents model-specific controls and separate thinking/content response fields."
+    ],
+    [
+      "S4",
+      "GLiNER (NAACL 2024)",
+      "https://aclanthology.org/2024.naacl-long.300/",
+      "Compact entity extraction with user-specified entity labels."
+    ],
+    [
+      "S5",
+      "GLiREL (NAACL 2025)",
+      "https://aclanthology.org/2025.naacl-long.418/",
+      "Relation classification given entities; a component for a pipeline, not a complete entity extractor."
+    ],
+    [
+      "S6",
+      "GoLLIE (ICLR 2024)",
+      "https://arxiv.org/abs/2310.03668",
+      "Evidence that annotation guidelines and task adaptation matter for information extraction."
+    ],
+    [
+      "S7",
+      "CaRB (EMNLP 2019)",
+      "https://aclanthology.org/D19-1651/",
+      "Demonstrates that Open IE benchmark data and tuple matching affect evaluation quality."
+    ],
+    [
+      "S8",
+      "Revisiting DocRED (EMNLP 2022)",
+      "https://aclanthology.org/2022.emnlp-main.580/",
+      "Shows that incomplete reference annotations can distort relation extraction evaluation; not evidence of the error rate in this dataset."
+    ],
+    [
+      "S9",
+      "LoRA (2021)",
+      "https://arxiv.org/abs/2106.09685",
+      "Parameter-efficient adaptation; does not establish an expected extraction gain for this task."
+    ],
+    [
+      "S10",
+      "Judging LLM-as-a-Judge (2023)",
+      "https://arxiv.org/abs/2306.05685",
+      "Documents judge biases; does not validate an LLM judge for this extraction benchmark."
+    ],
+    [
+      "S11",
+      "Statistical significance tests (Koehn, 2004)",
+      "https://aclanthology.org/W04-3250/",
+      "Supports paired resampling; document/record clustering here is an adaptation to this corpus."
+    ],
+    [
+      "S12",
+      "Ollama context length",
+      "https://docs.ollama.com/context-length",
+      "Allocated runtime context can differ from a checkpoint's advertised maximum."
+    ],
+    [
+      "S13",
+      "Qwen3-4B-Thinking-2507 official model card",
+      "https://huggingface.co/Qwen/Qwen3-4B-Thinking-2507",
+      "Separate thinking checkpoint; comparison with Instruct changes weights, not only a mode flag."
+    ]
+  ],
+  "review_notes": {
+    "3": "Clear Qwen error: papyrus sprout is typed ANIMAL. It also misses many gold concepts; some gold detail is a granularity choice.",
+    "60": "Qwen finds key places but chooses broad Place instead of gold Region/City/Country. It reverses HAS_POPULATION endpoints.",
+    "81": "Some facts agree despite types or inverse predicates; other Qwen triples attach the wrong arguments (building/register and factory/city).",
+    "98": "Qwen introduces NASCAR from the title, absent from the body, and connects title counts to generic titles rather than 39/15.",
+    "99": "Both describe illusions, but gold reifies events/dates while Qwen uses longer event phrases. This is a task-granularity mismatch plus omissions.",
+    "103": "Qwen merges two writers and uses PRODUCED_AND_DIRECTED_BY with reversed arguments. WORK versus Film is also a reasonable coarse type difference.",
+    "104": "Several Qwen relations are semantically good paraphrases or inverses: HAS_BIRTH_PLACE versus BORN_IN and IS_PARENT_OF versus CHILD_OF.",
+    "124": "PLAYS versus PORTRAYS can express the same fact, but Qwen also types Navarro as ORGANIZATION and merges multiple place mentions.",
+    "140": "Birth date is correct, but Portuguese is typed ORGANIZATION and footballer SPORT; other errors are merged location boundaries and label differences.",
+    "149": "Many relations express similar facts using different labels; Qwen changes some argument granularity and omits occupations/positions.",
+    "164": "Optional-sport facts are represented differently and duplicates occur; HAS_SPORT from Swimming to the Games is poorly oriented semantically.",
+    "165": "Qwen includes genuine facts but also types television sports journalist as ORGANIZATION and combines Philadelphia/Pennsylvania into one mention."
+  },
+  "ranking_semantics": {
+    "ease": "implementation effort",
+    "impact": "expected extraction-quality potential; unmeasured",
+    "value": "implementation effort versus expected extraction gain",
+    "professional": "recommended production-oriented order",
+    "academic": "experimental validity and attribution"
+  }
+}

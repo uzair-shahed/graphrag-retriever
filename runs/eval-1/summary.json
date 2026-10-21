@@ -1,0 +1,335 @@
+{
+  "groups": {
+    "record/vectorrag": {
+      "queries": 1,
+      "statuses": {
+        "failed": 1
+      },
+      "abstention_rate": 0.0,
+      "failure_rate": 1.0,
+      "traversal_incomplete": 0,
+      "metrics": {
+        "faithfulness": {
+          "mean": null,
+          "count": 0
+        },
+        "answer_relevancy": {
+          "mean": null,
+          "count": 0
+        },
+        "context_relevance": {
+          "mean": null,
+          "count": 0
+        }
+      },
+      "metric_failures": {
+        "faithfulness": 0,
+        "answer_relevancy": 0,
+        "context_relevance": 0
+      },
+      "answer_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_f1": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_precision": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "hop_coverage": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_context_supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "citation_gold_support_precision": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_relevance": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_metric_failures": 0,
+      "answerability_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "context_tokens": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "latency_seconds": {
+        "mean": 5.73985110000649,
+        "count": 1
+      }
+    },
+    "record/graphrag": {
+      "queries": 1,
+      "statuses": {
+        "failed": 1
+      },
+      "abstention_rate": 0.0,
+      "failure_rate": 1.0,
+      "traversal_incomplete": 0,
+      "metrics": {
+        "faithfulness": {
+          "mean": null,
+          "count": 0
+        },
+        "answer_relevancy": {
+          "mean": null,
+          "count": 0
+        },
+        "context_relevance": {
+          "mean": null,
+          "count": 0
+        }
+      },
+      "metric_failures": {
+        "faithfulness": 0,
+        "answer_relevancy": 0,
+        "context_relevance": 0
+      },
+      "answer_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_f1": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_precision": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "hop_coverage": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_context_supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "citation_gold_support_precision": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_relevance": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_metric_failures": 0,
+      "answerability_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "context_tokens": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "latency_seconds": {
+        "mean": 5.927043100004084,
+        "count": 1
+      }
+    },
+    "corpus/vectorrag": {
+      "queries": 1,
+      "statuses": {
+        "failed": 1
+      },
+      "abstention_rate": 0.0,
+      "failure_rate": 1.0,
+      "traversal_incomplete": 0,
+      "metrics": {
+        "faithfulness": {
+          "mean": null,
+          "count": 0
+        },
+        "answer_relevancy": {
+          "mean": null,
+          "count": 0
+        },
+        "context_relevance": {
+          "mean": null,
+          "count": 0
+        }
+      },
+      "metric_failures": {
+        "faithfulness": 0,
+        "answer_relevancy": 0,
+        "context_relevance": 0
+      },
+      "answer_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_f1": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_precision": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "hop_coverage": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_context_supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "citation_gold_support_precision": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_relevance": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_metric_failures": 0,
+      "answerability_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "context_tokens": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "latency_seconds": {
+        "mean": 5.725615300005302,
+        "count": 1
+      }
+    },
+    "corpus/graphrag": {
+      "queries": 1,
+      "statuses": {
+        "failed": 1
+      },
+      "abstention_rate": 0.0,
+      "failure_rate": 1.0,
+      "traversal_incomplete": 0,
+      "metrics": {
+        "faithfulness": {
+          "mean": null,
+          "count": 0
+        },
+        "answer_relevancy": {
+          "mean": null,
+          "count": 0
+        },
+        "context_relevance": {
+          "mean": null,
+          "count": 0
+        }
+      },
+      "metric_failures": {
+        "faithfulness": 0,
+        "answer_relevancy": 0,
+        "context_relevance": 0
+      },
+      "answer_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_f1": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "supporting_precision": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "hop_coverage": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "answer_context_supporting_recall": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "citation_gold_support_precision": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_relevance": {
+        "mean": null,
+        "count": 0
+      },
+      "retrieval_context_metric_failures": 0,
+      "answerability_accuracy": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "context_tokens": {
+        "mean": 0.0,
+        "count": 1
+      },
+      "latency_seconds": {
+        "mean": 5.849548800004413,
+        "count": 1
+      }
+    }
+  },
+  "paired_deltas_graphrag_minus_vectorrag": {
+    "corpus": {
+      "faithfulness": {
+        "mean": null,
+        "count": 0
+      },
+      "answer_relevancy": {
+        "mean": null,
+        "count": 0
+      },
+      "context_relevance": {
+        "mean": null,
+        "count": 0
+      },
+      "answer_accuracy": {
+        "mean": null,
+        "count": 0
+      }
+    },
+    "record": {
+      "faithfulness": {
+        "mean": null,
+        "count": 0
+      },
+      "answer_relevancy": {
+        "mean": null,
+        "count": 0
+      },
+      "context_relevance": {
+        "mean": null,
+        "count": 0
+      },
+      "answer_accuracy": {
+        "mean": null,
+        "count": 0
+      }
+    }
+  },
+  "completed_rows": 4
+}

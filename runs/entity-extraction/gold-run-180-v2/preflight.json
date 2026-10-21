@@ -1,0 +1,33 @@
+{
+  "checked_at": "2026-10-21T00:46:37.126638+00:00",
+  "models": {
+    "openrouter:openai/gpt-6.1-sol": {
+      "id": "openai/gpt-6.1-sol",
+      "supported_parameters": [
+        "include_reasoning",
+        "max_completion_tokens",
+        "max_tokens",
+        "reasoning",
+        "reasoning_effort",
+        "response_format",
+        "seed",
+        "structured_outputs",
+        "tool_choice",
+        "tools",
+        "verbosity"
+      ],
+      "reasoning": {
+        "mandatory": true,
+        "default_enabled": true,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low"
+        ],
+        "default_effort": "medium"
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "seed": 20261021,
+  "zero_based_indices": [
+    2,
+    59,
+    80,
+    97,
+    98,
+    102,
+    103,
+    123,
+    139,
+    148,
+    163,
+    164
+  ],
+  "chunk_ids": [
+    "musique:2hop__460946_294723:paragraph:2",
+    "musique:2hop__701895_752697:paragraph:19",
+    "musique:2hop__481349_302087:paragraph:0",
+    "musique:2hop__481349_302087:paragraph:17",
+    "musique:2hop__481349_302087:paragraph:18",
+    "musique:2hop__697790_864352:paragraph:2",
+    "musique:2hop__697790_864352:paragraph:3",
+    "musique:2hop__207476_625987:paragraph:3",
+    "musique:2hop__207476_625987:paragraph:19",
+    "musique:2hop__390947_232243:paragraph:8",
+    "musique:2hop__354635_174222:paragraph:3",
+    "musique:2hop__354635_174222:paragraph:4"
+  ]
+}

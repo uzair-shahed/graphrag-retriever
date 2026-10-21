@@ -1,0 +1,144 @@
+{
+  "selection": {
+    "dataset": "dataset\\musique\\data\\data\\musique_ans_v1.0_dev.jsonl",
+    "dataset_sha256": "15fa63794d18a94ce12411aca6e2327e65b6e83b0b1490efab3f1962e48abf3b",
+    "records_selected": 10,
+    "records": [
+      {
+        "id": "2hop__460946_294723",
+        "source_line": 1
+      },
+      {
+        "id": "2hop__252311_366220",
+        "source_line": 2
+      },
+      {
+        "id": "2hop__701895_752697",
+        "source_line": 3
+      },
+      {
+        "id": "2hop__259228_793698",
+        "source_line": 4
+      },
+      {
+        "id": "2hop__481349_302087",
+        "source_line": 5
+      },
+      {
+        "id": "2hop__697790_864352",
+        "source_line": 6
+      },
+      {
+        "id": "2hop__207476_625987",
+        "source_line": 7
+      },
+      {
+        "id": "2hop__390947_232243",
+        "source_line": 8
+      },
+      {
+        "id": "2hop__354635_174222",
+        "source_line": 9
+      },
+      {
+        "id": "2hop__635187_861533",
+        "source_line": 10
+      }
+    ]
+  },
+  "graph": {
+    "ready": true,
+    "selected_records": 10,
+    "missing_record_ids": [],
+    "issues": []
+  },
+  "prerequisites": {
+    "verified": true,
+    "neo4j": {
+      "database": "neo4j",
+      "server": {
+        "name": "Neo4j Kernel",
+        "versions": [
+          "2026.09.0"
+        ],
+        "edition": "enterprise"
+      }
+    },
+    "graphrag": {
+      "package": "neo4j-graphrag",
+      "version": "1.21.0",
+      "graph_rag_search": "(self, query_text: 'str' = '', message_history: 'Optional[Union[List[LLMMessage], MessageHistory]]' = None, examples: 'str' = '', retriever_config: 'Optional[dict[str, Any]]' = None, return_context: 'Optional[bool]' = None, response_fallback: 'Optional[str]' = None) -> 'RagResultModel'",
+      "vector_retriever": "(driver: 'neo4j.Driver', index_name: 'str', embedder: 'Optional[Embedder]' = None, return_properties: 'Optional[list[str]]' = None, result_formatter: 'Optional[Callable[[neo4j.Record], RetrieverResultItem]]' = None, neo4j_database: 'Optional[str]' = None) -> 'None'",
+      "vector_cypher_retriever": "(driver: 'neo4j.Driver', index_name: 'str', retrieval_query: 'str', embedder: 'Optional[Embedder]' = None, result_formatter: 'Optional[Callable[[neo4j.Record], RetrieverResultItem]]' = None, neo4j_database: 'Optional[str]' = None) -> 'None'",
+      "provider": "OllamaSettings",
+      "llm_model": "qwen3:4b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "host": "http://localhost:11434"
+    },
+    "vector_index": {
+      "name": "chunk_embedding",
+      "state": "reported_by_neo4j",
+      "label": "Chunk",
+      "embedding_property": "embedding",
+      "dimensions": 786,
+      "similarity": "COSINE",
+      "filterable_properties": [
+        "record_id"
+      ]
+    },
+    "graph": {
+      "documents": 9498,
+      "chunks": 9498,
+      "entities": 55542,
+      "relationships": 113453
+    },
+    "provenance": null,
+    "record_filter": {
+      "property": "record_id",
+      "index_declares_property": true,
+      "state": "in_index",
+      "records": {
+        "2hop__460946_294723": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__252311_366220": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__701895_752697": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__259228_793698": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__481349_302087": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__697790_864352": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__207476_625987": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__390947_232243": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__354635_174222": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        },
+        "2hop__635187_861533": {
+          "chunks": 20,
+          "chunks_with_property": 20
+        }
+      }
+    }
+  }
+}

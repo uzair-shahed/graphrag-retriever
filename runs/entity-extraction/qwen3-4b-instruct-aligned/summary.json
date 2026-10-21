@@ -1,0 +1,73 @@
+{
+  "format_version": 1,
+  "kind": "candidate",
+  "run_id": "72ac39b5ba314c18bc7683d0719537ba",
+  "complete": true,
+  "successful": false,
+  "score_population": "completed candidate rows with usable gold, including failed extractions as empty predictions; pending rows and skipped gold not scored",
+  "models": {
+    "ollama:qwen3:4b-instruct": {
+      "expected": 174,
+      "attempted": 174,
+      "succeeded": 60,
+      "failed": 114,
+      "pending": 0,
+      "elapsed_seconds": 4267.988996899934,
+      "compared": 174,
+      "micro": {
+        "entities": {
+          "tp": 262,
+          "fp": 222,
+          "fn": 2919,
+          "precision": 0.5413223140495868,
+          "recall": 0.08236403646651996,
+          "f1": 0.14297407912687585
+        },
+        "relations": {
+          "tp": 26,
+          "fp": 342,
+          "fn": 3352,
+          "precision": 0.07065217391304347,
+          "recall": 0.0076968620485494375,
+          "f1": 0.013881473571809931
+        }
+      }
+    }
+  },
+  "requested": 180,
+  "comparable": 174,
+  "skipped": 6,
+  "evidence_offsets": "align-unique",
+  "skipped_gold": [
+    {
+      "chunk_id": "musique:2hop__460946_294723:paragraph:6",
+      "reason": "gold_failed",
+      "error_type": "ValueError"
+    },
+    {
+      "chunk_id": "musique:2hop__252311_366220:paragraph:17",
+      "reason": "gold_failed",
+      "error_type": "ValueError"
+    },
+    {
+      "chunk_id": "musique:2hop__697790_864352:paragraph:13",
+      "reason": "gold_failed",
+      "error_type": "ValueError"
+    },
+    {
+      "chunk_id": "musique:2hop__697790_864352:paragraph:16",
+      "reason": "gold_failed",
+      "error_type": "ValueError"
+    },
+    {
+      "chunk_id": "musique:2hop__390947_232243:paragraph:13",
+      "reason": "gold_failed",
+      "error_type": "ValueError"
+    },
+    {
+      "chunk_id": "musique:2hop__390947_232243:paragraph:14",
+      "reason": "gold_failed",
+      "error_type": "ValueError"
+    }
+  ]
+}

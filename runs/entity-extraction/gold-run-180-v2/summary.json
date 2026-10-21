@@ -1,0 +1,22 @@
+{
+  "format_version": 2,
+  "kind": "gold",
+  "run_id": "4f35d3bdca974ad9b28218d37f21ed4e",
+  "complete": true,
+  "successful": true,
+  "score_population": "completed rows, including failed extractions as empty predictions; pending rows not scored",
+  "models": {
+    "openrouter:openai/gpt-6.1-sol": {
+      "expected": 180,
+      "attempted": 180,
+      "succeeded": 180,
+      "failed": 0,
+      "pending": 0,
+      "elapsed_seconds": 8332.218376599987,
+      "generation_formats": {
+        "legacy_v1": 180,
+        "simplified_v2": 0
+      }
+    }
+  }
+}

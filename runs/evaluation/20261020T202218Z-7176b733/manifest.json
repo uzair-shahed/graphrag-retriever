@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "run_id": "b7902a5a-1044-427e-bd46-0f94a9bdffc1",
+  "status": "completed",
+  "dataset": "dataset\\musique\\data\\data\\musique_ans_v1.0_dev.jsonl",
+  "dataset_sha256": "15fa63794d18a94ce12411aca6e2327e65b6e83b0b1490efab3f1962e48abf3b",
+  "selected_records": [
+    {
+      "id": "2hop__460946_294723",
+      "source_line": 1
+    },
+    {
+      "id": "2hop__252311_366220",
+      "source_line": 2
+    },
+    {
+      "id": "2hop__701895_752697",
+      "source_line": 3
+    },
+    {
+      "id": "2hop__259228_793698",
+      "source_line": 4
+    },
+    {
+      "id": "2hop__481349_302087",
+      "source_line": 5
+    },
+    {
+      "id": "2hop__697790_864352",
+      "source_line": 6
+    },
+    {
+      "id": "2hop__207476_625987",
+      "source_line": 7
+    },
+    {
+      "id": "2hop__390947_232243",
+      "source_line": 8
+    },
+    {
+      "id": "2hop__354635_174222",
+      "source_line": 9
+    },
+    {
+      "id": "2hop__635187_861533",
+      "source_line": 10
+    }
+  ],
+  "settings": {
+    "top_k": 5,
+    "max_context_chunks": 5,
+    "max_context_tokens": 4096,
+    "max_graph_nodes": 200,
+    "conditions": [
+      "record",
+      "corpus"
+    ]
+  },
+  "configuration": {
+    "retrieval_models": {
+      "host": "http://localhost:11434",
+      "llm_model": "qwen3:4b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "chunk_size": 10000,
+      "chunk_overlap": 0,
+      "request_timeout_seconds": 120,
+      "llm_max_tokens": 4096
+    },
+    "answer_models": {
+      "host": "http://localhost:11434",
+      "llm_model": "qwen3:4b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "chunk_size": 10000,
+      "chunk_overlap": 0,
+      "request_timeout_seconds": 120,
+      "llm_max_tokens": 4096
+    },
+    "evaluator": {
+      "provider": "ollama",
+      "llm_model": "qwen3:4b-instruct",
+      "embedding_model": "nomic-embed-text",
+      "base_url": "http://localhost:11434/v1",
+      "max_tokens": 4096,
+      "timeout": 180.0,
+      "retries": 2
+    },
+    "index": {
+      "name": "chunk_embedding",
+      "label": "Chunk",
+      "embedding_property": "embedding",
+      "dimensions": 786,
+      "similarity": "cosine",
+      "filter_property": "record_id"
+    },
+    "neo4j_database": "neo4j",
+    "query_policy": "original question only; no title hints or gold decomposition",
+    "answer_policy": "shared generator and validator for vector and graph-expanded evidence"
+  },
+  "versions": {
+    "ragas": "0.4.3",
+    "neo4j-graphrag": "1.21.0",
+    "neo4j": "5.28.7",
+    "tiktoken": "0.14.0"
+  },
+  "context_tokenizer": "cl100k_base (comparison proxy; not the answer model's native tokenizer)",
+  "snapshot_before": {
+    "sha256": "33cae00da9d057e12ec4bde4b14d195fc20e06ab61e36e47be4f5610114ae31e",
+    "nodes": 84036,
+    "relationships": 113453,
+    "indexes": 7332
+  },
+  "snapshot_after": {
+    "sha256": "33cae00da9d057e12ec4bde4b14d195fc20e06ab61e36e47be4f5610114ae31e",
+    "nodes": 84036,
+    "relationships": 113453,
+    "indexes": 7332
+  },
+  "snapshot_consistent": true
+}
