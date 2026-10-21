@@ -7,12 +7,12 @@
   "score_population": "completed rows, including failed extractions as empty predictions; pending rows not scored",
   "models": {
     "openrouter:openai/gpt-6.1-sol": {
-      "expected": 150,
-      "attempted": 150,
-      "succeeded": 138,
-      "failed": 12,
+      "expected": 180,
+      "attempted": 180,
+      "succeeded": 174,
+      "failed": 6,
       "pending": 0,
-      "elapsed_seconds": 6731.5586079999775
+      "elapsed_seconds": 8332.218376599987
     }
   }
 }

@@ -4,8 +4,8 @@
   "run_id": "9e6ce4d58bea41c49f8c78ccd0a9c1cc",
   "created_at": "2026-10-20T21:51:03.016458+00:00",
   "configuration": {
-    "paragraphs": 150,
-    "cohort_sha256": "8656c58eebb5b230de59f9e85e623028b5d4503d90123a6abf196cbbd74068c0",
+    "paragraphs": 180,
+    "cohort_sha256": "c6f9faedb8fc01cc6b4d14452250807bdfb205ed939000e53fd36db62bdd59cb",
     "models": [
       {
         "provider": "openrouter",
