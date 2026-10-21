@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "kind": "gold",
+  "run_id": "9e6ce4d58bea41c49f8c78ccd0a9c1cc",
+  "complete": true,
+  "successful": false,
+  "score_population": "completed rows, including failed extractions as empty predictions; pending rows not scored",
+  "models": {
+    "openrouter:openai/gpt-6.1-sol": {
+      "expected": 150,
+      "attempted": 150,
+      "succeeded": 138,
+      "failed": 12,
+      "pending": 0,
+      "elapsed_seconds": 6731.5586079999775
+    }
+  }
+}
