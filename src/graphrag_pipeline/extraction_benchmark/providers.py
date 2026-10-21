@@ -23,10 +23,7 @@ explicitly identified people, organizations, places, events, works, dates,
 quantities and concepts. Copy entity mentions from the body; do not invent
 canonical names, aliases or facts. Use concise PascalCase entity types and
 UPPER_SNAKE_CASE relationship types consistently. Assign unique mention IDs
-and refer to those IDs in triples. Evidence spans use zero-based Python Unicode
-string offsets into the original body, with an exclusive end, and must copy
-that exact body substring. Do not use title offsets. Give each triple a
-confidence from 0 to 1. Return only the JSON object with mentions and triples
+and refer to those IDs in triples. Return only the JSON object with mentions and triples
 matching the supplied schema. Empty arrays are allowed if nothing is supported.
 """
 

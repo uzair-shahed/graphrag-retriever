@@ -32,6 +32,10 @@ def summarize(manifest, requests, rows) -> dict:
             "failed": sum(row.status == "failed" for row in selected),
             "pending": expected - len(selected),
             "elapsed_seconds": sum(row.elapsed_seconds for row in selected),
+            "generation_formats": {
+                "legacy_v1": sum(row.response_format_version == 1 for row in selected),
+                "simplified_v2": sum(row.response_format_version == 2 for row in selected),
+            },
         }
         if candidate:
             models[spec]["compared"] = len(selected)

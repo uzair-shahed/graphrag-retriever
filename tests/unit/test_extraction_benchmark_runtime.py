@@ -36,13 +36,10 @@ def cohort(tmp_path):
 
 def payload(request):
     return {"mentions": [
-        {"mention_id": name.lower(), "mention": name, "entity_type": "Person",
-         "evidence_span": {"start": request.text.index(name),
-                           "end": request.text.index(name) + len(name), "text": name}}
+        {"mention_id": name.lower(), "mention": name, "entity_type": "Person"}
         for name in ("Alice", "Bob")
     ], "triples": [{"source_mention_id": "alice", "target_mention_id": "bob",
-                    "relationship_type": "MET", "confidence": 0.9,
-                    "evidence_span": {"start": 0, "end": len(request.text), "text": request.text}}]}
+                    "relationship_type": "MET"}]}
 
 
 def content(request):
@@ -396,6 +393,27 @@ def test_cli_invalid_settings_are_json_errors_and_nonzero(cohort, tmp_path, monk
     with pytest.raises(SystemExit) as raised: main()
     assert raised.value.code == 2
     assert json.loads(capsys.readouterr().out)["status"] == "failed"
+
+
+def test_cli_unicode_preview_supports_windows_redirected_stdout(cohort, monkeypatch):
+    import io
+    import sys
+
+    source = Path(cohort[0].provenance.source_file)
+    record = json.loads(source.read_text(encoding="utf-8"))
+    record["paragraphs"][0]["title"] = "Simi\u0107 \U0001f600"
+    source.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+    encoded = io.BytesIO()
+    stdout = io.TextIOWrapper(encoded, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "argv", ["benchmark", "select", "--paragraphs", "1",
+                                     "--dataset-path", cohort[0].provenance.source_file])
+    with pytest.raises(SystemExit) as raised:
+        main()
+    assert raised.value.code == 0
+    stdout.flush()
+    preview = json.loads(encoded.getvalue().decode("cp1252"))
+    assert preview["selection"][0]["title"] == record["paragraphs"][0]["title"]
 
 
 @pytest.mark.parametrize("answer_provider", ["ollama", "openrouter"])

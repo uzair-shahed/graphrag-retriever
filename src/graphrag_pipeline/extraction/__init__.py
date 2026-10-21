@@ -21,7 +21,6 @@ from graphrag_pipeline.extraction.provider import (
 )
 
 from graphrag_pipeline.extraction.schemas import (
-    EvidenceSpan,
     ExtractionRequest,
     ExtractionResult,
     Mention,
@@ -31,7 +30,6 @@ from graphrag_pipeline.extraction.schemas import (
 )
 
 __all__ = [
-    "EvidenceSpan",
     "DeterministicMockProvider",
     "ExtractionProvider",
     "ExtractionRequest",

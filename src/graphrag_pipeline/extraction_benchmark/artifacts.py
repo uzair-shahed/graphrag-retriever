@@ -18,7 +18,7 @@ from graphrag_pipeline.extraction_benchmark.contracts import ParagraphExtraction
 from graphrag_pipeline.extraction_benchmark.providers import SYSTEM_PROMPT, parse_model
 from graphrag_pipeline.extraction_benchmark.scoring import SCORING_VERSION, score
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 APPEND_TRANSACTION = ".append-transaction.json"
 
 
@@ -108,6 +108,7 @@ class SavedExtraction(BaseModel):
     elapsed_seconds: float = Field(ge=0)
     metadata: dict
     scores: dict | None = None
+    response_format_version: StrictInt = Field(default=2, ge=1, le=2)
 
     @model_validator(mode="after")
     def validate_status(self):
@@ -146,7 +147,8 @@ def validate_gold_coverage(requests, reference, skipped_gold):
     return [by_id[r.chunk_id].model_dump(mode="json") for r in requests if r.chunk_id in by_id]
 
 
-def validate_rows(raw_rows, requests, model_specs, *, reference=None) -> dict[tuple[str, str], SavedExtraction]:
+def validate_rows(raw_rows, requests, model_specs, *, reference=None,
+                  legacy_rows=None) -> dict[tuple[str, str], SavedExtraction]:
     by_id = {request.chunk_id: request for request in requests}
     rows = {}
     for raw in raw_rows:
@@ -156,10 +158,15 @@ def validate_rows(raw_rows, requests, model_specs, *, reference=None) -> dict[tu
             raise ValueError("unknown model/chunk or duplicate saved extraction")
         if reference is not None and row.chunk_id not in reference:
             raise ValueError("saved prediction has no usable gold label")
+        if row.response_format_version == 1:
+            original = (legacy_rows or {}).get(key)
+            if original is None or original.get("raw_content_sha256") != digest(row.raw_content):
+                raise ValueError("legacy response is missing migration provenance or its raw content changed")
         request = by_id[row.chunk_id]
         if row.result is not None:
             validate_result_for_request(request, row.result)
-            parsed = validate_extraction_response(request, row.raw_content)
+            parsed = validate_extraction_response(request, row.raw_content,
+                                                  response_format_version=row.response_format_version)
             if parsed != row.result:
                 raise ValueError("saved result differs from validated raw content")
         expected_scores = score(reference[row.chunk_id], row.result) if reference is not None else None
@@ -171,6 +178,8 @@ def validate_rows(raw_rows, requests, model_specs, *, reference=None) -> dict[tu
 
 def load_run(directory: Path):
     manifest = read_json(directory / "manifest.json")
+    if manifest.get("format_version") == 1:
+        raise ValueError("benchmark format v1 requires offline conversion: use migrate --input OLD_RUN --output NEW_RUN (and --gold CONVERTED_GOLD for candidates)")
     transaction_path = directory / APPEND_TRANSACTION
     transaction = read_json(transaction_path) if transaction_path.exists() else None
     if transaction is not None:
@@ -198,6 +207,16 @@ def load_run(directory: Path):
         raise ValueError("missing or duplicate model configurations")
     for spec in specs:
         parse_model(spec)
+    legacy_rows = {}
+    if "migration" in manifest:
+        audit = read_json(directory / "migration.json")
+        if digest(audit) != manifest["migration"]["audit_sha256"]:
+            raise ValueError("migration audit checksum mismatch")
+        for row in audit["rows"]:
+            key = (row["model"], row["chunk_id"])
+            if key in legacy_rows:
+                raise ValueError("duplicate migration audit row")
+            legacy_rows[key] = row
     reference = None
     if manifest["kind"] == "candidate":
         raw_reference = transaction["reference"] if transaction is not None else read_jsonl(directory / "reference.jsonl")
@@ -214,7 +233,8 @@ def load_run(directory: Path):
         if validate_gold_coverage(requests, reference, skipped_gold) != skipped_gold:
             raise ValueError("skipped gold must follow cohort order")
     path = directory / ("gold.jsonl" if manifest["kind"] == "gold" else "predictions.jsonl")
-    rows = validate_rows(read_jsonl(path) if path.exists() else [], requests, specs, reference=reference)
+    rows = validate_rows(read_jsonl(path) if path.exists() else [], requests, specs, reference=reference,
+                         legacy_rows=legacy_rows)
     return manifest, requests, rows, reference
 
 

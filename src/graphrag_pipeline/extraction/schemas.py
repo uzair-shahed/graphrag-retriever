@@ -4,8 +4,7 @@ Last modified: 2026-09-23
 
 Purpose of this file:
     Define and validate the Contract 2 extraction request and result models,
-    including provenance, evidence spans, mentions, relationships, and
-    confidence values.
+    including provenance, mentions, and directed relationships.
 
 Files that use this file:
     The extraction agent and its provider boundary use these models. The unit
@@ -32,7 +31,7 @@ from __future__ import annotations
 
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
 
 class Provenance(BaseModel):
@@ -61,43 +60,24 @@ class ExtractionRequest(BaseModel):
     provenance: Provenance
 
 
-class EvidenceSpan(BaseModel):
-    """Contract 2 evidence span with offsets into the original chunk text."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    start: StrictInt = Field(ge=0)
-    end: StrictInt = Field(gt=0)
-    text: StrictStr = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_bounds_and_text(self) -> Self:
-        if self.end <= self.start:
-            raise ValueError("evidence span end must be greater than start")
-        return self
-
-
 class Mention(BaseModel):
-    """Contract 2 extracted entity mention and its source span."""
+    """Extracted entity mention with a paragraph-local relationship identifier."""
 
     model_config = ConfigDict(extra="forbid")
 
     mention_id: StrictStr = Field(min_length=1)
     mention: StrictStr = Field(min_length=1)
     entity_type: StrictStr = Field(min_length=1)
-    evidence_span: EvidenceSpan
 
 
 class Triple(BaseModel):
-    """Contract 2 extracted relationship and confidence score."""
+    """Directed relationship between two paragraph-local mentions."""
 
     model_config = ConfigDict(extra="forbid")
 
     source_mention_id: StrictStr = Field(min_length=1)
     relationship_type: StrictStr = Field(min_length=1)
     target_mention_id: StrictStr = Field(min_length=1)
-    evidence_span: EvidenceSpan
-    confidence: StrictFloat = Field(ge=0.0, le=1.0)
 
 
 class ExtractionResult(BaseModel):
@@ -143,13 +123,5 @@ def validate_result_for_request(
         raise ValueError("extraction result chunk_text does not match the request text")
     if result.provenance != request.provenance:
         raise ValueError("extraction result provenance does not match the request")
-
-    for collection in (result.mentions, result.triples):
-        for item in collection:
-            span = item.evidence_span
-            if span.end > len(request.text):
-                raise ValueError("evidence span exceeds request text length")
-            if request.text[span.start : span.end] != span.text:
-                raise ValueError("evidence span text does not match request text")
 
     return result

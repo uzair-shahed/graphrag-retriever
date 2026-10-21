@@ -45,19 +45,10 @@ def paragraph(tmp_path):
 
 
 def extraction_payload(paragraph):
-    text = paragraph.text
     return {
-        "mentions": [
-            {"mention_id": name.lower(), "mention": name, "entity_type": "Person",
-             "evidence_span": {"start": text.index(name),
-                               "end": text.index(name) + len(name), "text": name}}
-            for name in ("Alice", "Bob")
-        ],
-        "triples": [{
-            "source_mention_id": "alice", "relationship_type": "MET",
-            "target_mention_id": "bob", "confidence": 0.99,
-            "evidence_span": {"start": 0, "end": len(text), "text": text},
-        }],
+        "mentions": [{"mention_id": name.lower(), "mention": name, "entity_type": "Person"}
+                     for name in ("Alice", "Bob")],
+        "triples": [{"source_mention_id": "alice", "relationship_type": "MET", "target_mention_id": "bob"}],
     }
 
 
@@ -131,11 +122,14 @@ def test_output_schema_reuses_existing_mentions_and_triples():
     shared = ExtractionResult.model_json_schema()
     assert schema["required"] == ["mentions", "triples"]
     assert schema["additionalProperties"] is False
-    for name in ("Mention", "Triple", "EvidenceSpan"):
+    for name in ("Mention", "Triple"):
         assert schema["$defs"][name] == shared["$defs"][name]
     assert schema["properties"]["mentions"]["items"] == {"$ref": "#/$defs/Mention"}
     assert schema["properties"]["triples"]["items"] == {"$ref": "#/$defs/Triple"}
     assert "Provenance" not in schema["$defs"]
+    assert "EvidenceSpan" not in schema["$defs"]
+    assert "confidence" not in json.dumps(schema)
+    assert "evidence_span" not in json.dumps(schema)
 
 
 def test_valid_output_binds_local_identity_and_validates_shared_contract(paragraph):
@@ -156,12 +150,10 @@ def test_empty_extraction_is_valid(paragraph):
 @pytest.mark.parametrize("mutation, message", [
     ("unknown_endpoint", "unknown target mention ID"),
     ("duplicate_id", "mention_id values must be unique"),
-    ("span_text", "evidence span text does not match"),
-    ("span_bounds", "evidence span exceeds"),
-    ("relation_span", "evidence span text does not match"),
-    ("confidence", "less than or equal to 1"),
+    ("confidence", "Extra inputs are not permitted"),
+    ("evidence_span", "Extra inputs are not permitted"),
     ("extra_identity", "Extra inputs are not permitted"),
-    ("wrong_type", "valid integer"),
+    ("wrong_type", "valid string"),
 ])
 def test_invalid_output_cannot_become_gold_or_prediction(paragraph, mutation, message):
     payload = extraction_payload(paragraph)
@@ -169,18 +161,14 @@ def test_invalid_output_cannot_become_gold_or_prediction(paragraph, mutation, me
         payload["triples"][0]["target_mention_id"] = "missing"
     elif mutation == "duplicate_id":
         payload["mentions"][1]["mention_id"] = "alice"
-    elif mutation == "span_text":
-        payload["mentions"][0]["evidence_span"]["text"] = "wrong"
-    elif mutation == "span_bounds":
-        payload["mentions"][0]["evidence_span"]["end"] = len(paragraph.text) + 1
-    elif mutation == "relation_span":
-        payload["triples"][0]["evidence_span"]["text"] = "wrong"
     elif mutation == "confidence":
-        payload["triples"][0]["confidence"] = 1.1
+        payload["triples"][0]["confidence"] = 0.99
+    elif mutation == "evidence_span":
+        payload["mentions"][0]["evidence_span"] = {"start": 0, "end": 1, "text": "x"}
     elif mutation == "extra_identity":
         payload["record_id"] = "injected"
     elif mutation == "wrong_type":
-        payload["mentions"][0]["evidence_span"]["start"] = "2"
+        payload["mentions"][0]["mention_id"] = 2
     with pytest.raises(ValueError, match=message):
         validate_extraction_response(paragraph, json.dumps(payload))
 

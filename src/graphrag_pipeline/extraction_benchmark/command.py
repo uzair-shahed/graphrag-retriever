@@ -22,6 +22,15 @@ def build_parser():
     run = sub.add_parser("run", help="Compare OpenRouter/Ollama candidates with usable saved gold; report missing labels.")
     offline = sub.add_parser("report", help="Validate saved artifacts and regenerate summary.json offline.")
     offline.add_argument("--input", type=Path, required=True, help="Gold or candidate run directory.")
+    visual = sub.add_parser("visualize", help="Compare saved v2 runs in an offline HTML report and SVG charts.")
+    visual.add_argument("--gold", type=Path, required=True, help="Matching format-v2 gold directory.")
+    visual.add_argument("--run", action="append", required=True, help="Repeat LABEL=PATH for each candidate run.")
+    visual.add_argument("--output", type=Path, required=True, help="Report directory, separate from benchmark inputs.")
+    migrate = sub.add_parser("migrate", help="Convert v1 saved responses to v2 offline without model calls.")
+    migrate.add_argument("--input", type=Path, required=True, help="Inactive format-v1 gold or candidate directory.")
+    migrate.add_argument("--output", type=Path, required=True, help="Separate new/empty destination directory.")
+    migrate.add_argument("--gold", type=Path, help="Converted v2 gold directory; required for candidate conversion.")
+    migrate.add_argument("--dry-run", action="store_true", help="Preview conversion without providers or artifact writes.")
     for command in (select, gold):
         command.add_argument("--dataset-path", type=Path, default=DEFAULT_DATASET)
         command.add_argument("--paragraphs", type=int, default=150 if command is select else None,
@@ -78,6 +87,13 @@ def append_range(args):
 
 
 def execute(args):
+    if args.command == "visualize":
+        from graphrag_pipeline.extraction_benchmark.visualization import visualize
+        return 0, visualize(args.gold, args.run, args.output)
+    if args.command == "migrate":
+        from graphrag_pipeline.extraction_benchmark.migration import migrate_run
+        summary = migrate_run(args.input, args.output, gold=args.gold, dry_run=args.dry_run)
+        return 0, {"output": str(args.output), **summary}
     if args.command == "report":
         summary = report(args.input)
         return (0 if summary["successful"] else 1), {"output": str(args.input), **summary}
@@ -154,7 +170,8 @@ def main():
         if secret:
             message = message.replace(secret, "[redacted]")
         code, result = 2, {"status": "failed", "type": type(error).__name__, "error": message}
-    print(json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False))
+    # JSON escapes preserve Unicode while supporting Windows redirected stdout.
+    print(json.dumps(result, indent=2, ensure_ascii=True, allow_nan=False))
     raise SystemExit(code)
 
 

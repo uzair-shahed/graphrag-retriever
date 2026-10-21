@@ -4,7 +4,7 @@ Last modified: 2026-09-23
 
 Purpose of this file:
     Verify the minimum Contract 2 request/result schemas, provenance
-    preservation, evidence spans, mention references, confidence bounds, and
+    preservation, mention references and
     exclusion of gold evaluation labels from the model-visible request.
 
     These tests exercise the boundary between a validated MuSiQue paragraph chunk
@@ -23,8 +23,7 @@ Caveats:
 
     Contract 1's full record adapter, provider invocation, retry handling, and
     Neo4j persistence are outside this module. This module verifies only schema
-    shape, provenance and identity preservation, evidence spans, mention
-    references, and confidence validation.
+    shape, provenance and identity preservation, and mention references.
 """
 
 import json
@@ -67,8 +66,6 @@ def valid_result(request: ExtractionRequest) -> ExtractionResult:
         relationship.
     """
     text = request.text
-    service_start = text.index("Aster Systems")
-    company_start = text.index("Northwind Labs")
     return ExtractionResult.model_validate(
         {
             "chunk_id": request.chunk_id,
@@ -80,21 +77,11 @@ def valid_result(request: ExtractionRequest) -> ExtractionResult:
                     "mention_id": "mention-1",
                     "mention": "Aster Systems",
                     "entity_type": "Organization",
-                    "evidence_span": {
-                        "start": service_start,
-                        "end": service_start + len("Aster Systems"),
-                        "text": "Aster Systems",
-                    },
                 },
                 {
                     "mention_id": "mention-2",
                     "mention": "Northwind Labs",
                     "entity_type": "Organization",
-                    "evidence_span": {
-                        "start": company_start,
-                        "end": company_start + len("Northwind Labs"),
-                        "text": "Northwind Labs",
-                    },
                 },
             ],
             "triples": [
@@ -102,12 +89,6 @@ def valid_result(request: ExtractionRequest) -> ExtractionResult:
                     "source_mention_id": "mention-1",
                     "relationship_type": "ACQUIRED",
                     "target_mention_id": "mention-2",
-                    "evidence_span": {
-                        "start": 0,
-                        "end": len(text),
-                        "text": text,
-                    },
-                    "confidence": 0.99,
                 }
             ],
         }
@@ -159,7 +140,7 @@ def test_valid_result_preserves_contract_identity_and_provenance() -> None:
         None.
     Outputs:
         No return value; passes when result identity, provenance, and
-        relationship confidence are preserved.
+        relationship endpoints are preserved.
     """
     request = load_request()
 
@@ -168,7 +149,7 @@ def test_valid_result_preserves_contract_identity_and_provenance() -> None:
     assert result.chunk_id == request.chunk_id
     assert result.record_id == request.record_id
     assert result.provenance == request.provenance
-    assert result.triples[0].confidence == 0.99
+    assert result.triples[0].relationship_type == "ACQUIRED"
 
 
 def test_duplicate_mentions_are_rejected() -> None:
@@ -205,39 +186,11 @@ def test_unknown_triple_mention_is_rejected() -> None:
         ExtractionResult.model_validate(result)
 
 
-def test_invalid_span_text_is_rejected_at_request_boundary() -> None:
-    """Reject evidence whose copied text does not match the source chunk.
-
-    Inputs:
-        None.
-    Outputs:
-        No return value; passes when request/result validation raises
-        ``ValueError`` for mismatched evidence text.
-    """
-    request = load_request()
-    result = valid_result(request).model_dump()
-    result["mentions"][0]["evidence_span"]["text"] = "wrong text"
-
-    with pytest.raises(ValueError, match="evidence span text"):
-        validate_result_for_request(
-            request, ExtractionResult.model_validate(result)
-        )
-
-
-def test_confidence_must_be_between_zero_and_one() -> None:
-    """Reject relationship confidence values outside the Contract 2 range.
-
-    Inputs:
-        None.
-    Outputs:
-        No return value; passes when confidence above ``1.0`` raises
-        ``pydantic.ValidationError``.
-    """
-    request = load_request()
-    result = valid_result(request).model_dump()
-    result["triples"][0]["confidence"] = 1.1
-
-    with pytest.raises(ValidationError, match="less than or equal to 1"):
+@pytest.mark.parametrize("field", ["confidence", "evidence_span"])
+def test_retired_fields_are_not_part_of_new_output(field):
+    result = valid_result(load_request()).model_dump()
+    result["triples"][0][field] = 0.9
+    with pytest.raises(ValidationError, match="extra_forbidden"):
         ExtractionResult.model_validate(result)
 
 
