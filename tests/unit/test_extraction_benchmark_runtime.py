@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from graphrag_pipeline.extraction_benchmark.artifacts import (
-    atomic_text, load_gold, read_json, read_jsonl, run_lock, write_jsonl,
+    APPEND_TRANSACTION, atomic_text, load_gold, load_run, read_json, read_jsonl, run_lock, write_jsonl,
 )
 from graphrag_pipeline.extraction_benchmark.command import build_parser, execute, main
 from graphrag_pipeline.extraction_benchmark.contracts import ParagraphExtraction, validate_extraction_response
@@ -226,17 +226,19 @@ def test_gold_interrupt_resume_skips_paid_work_and_offline_report(cohort, tmp_pa
     factory = FakeFactory()
     gold_run(cohort, output, factory, resume=True)
     assert factory.calls == factory.checks == []
-    requests, reference, fingerprint = load_gold(output)
+    requests, reference, fingerprint, skipped = load_gold(output)
+    assert skipped == []
     assert requests == cohort and len(reference) == 2 and len(fingerprint) == 64
     assert "secret-key" not in (output / "manifest.json").read_text()
 
 
-def test_saved_failures_require_explicit_retry_and_incomplete_gold_rejected(cohort, tmp_path):
+def test_saved_failures_require_explicit_retry_and_partial_gold_is_usable(cohort, tmp_path):
     output = tmp_path / "gold"
     factory = FakeFactory(lambda model, request: "malformed" if request.paragraph_idx else content(request))
     assert not gold_run(cohort, output, factory)["successful"]
-    with pytest.raises(ValueError, match="incomplete or failed"):
-        load_gold(output)
+    requests, reference, _, skipped = load_gold(output)
+    assert requests == cohort and list(reference) == [cohort[0].chunk_id]
+    assert skipped == [{"chunk_id": cohort[1].chunk_id, "reason": "gold_failed", "error_type": "ValidationError"}]
     no_work = FakeFactory()
     gold_run(cohort, output, no_work, resume=True)
     assert no_work.calls == []
@@ -246,10 +248,41 @@ def test_saved_failures_require_explicit_retry_and_incomplete_gold_rejected(coho
     assert [row["attempts"] for row in read_jsonl(output / "gold.jsonl")] == [1, 2]
 
 
+def test_cli_retry_reports_count_mismatch_then_retries_only_failures(cohort, tmp_path, monkeypatch):
+    import graphrag_pipeline.extraction_benchmark.command as command
+
+    factory = FakeFactory(lambda model, request: "malformed" if request.paragraph_idx else content(request))
+    monkeypatch.setattr(command, "run_extraction", lambda *args, **kwargs: run_extraction(
+        *args, **kwargs, provider_factory=factory))
+    parser = build_parser()
+    output = tmp_path / "gold"
+    arguments = ["gold", "--dataset-path", cohort[0].provenance.source_file,
+                 "--model", "gold", "--reasoning-effort", "high", "--output", str(output),
+                 "--no-progress"]
+    assert execute(parser.parse_args([*arguments, "--paragraphs", "2"]))[0] == 1
+    snapshots = {path.name: path.read_bytes() for path in output.iterdir()}
+    factory.calls.clear()
+    factory.checks.clear()
+    with pytest.raises(ValueError, match=r"saved run has 2 paragraphs, but requested 1.*--paragraphs 2"):
+        execute(parser.parse_args([*arguments, "--paragraphs", "1", "--resume", "--retry-failed"]))
+    assert factory.calls == factory.checks == []
+    assert snapshots == {path.name: path.read_bytes() for path in output.iterdir()}
+
+    factory.behavior = None
+    code, summary = execute(parser.parse_args([
+        *arguments, "--paragraphs", "2", "--resume", "--retry-failed"]))
+    assert code == 0 and summary["successful"]
+    assert factory.calls == [("openrouter:gold", cohort[1].chunk_id)]
+    saved = read_jsonl(output / "gold.jsonl")
+    original = [json.loads(line) for line in snapshots["gold.jsonl"].decode().splitlines()]
+    assert saved[0] == original[0]
+    assert saved[1]["attempts"] == 2
+
+
 def test_candidate_matrix_scores_failures_and_needs_no_original_dataset(cohort, tmp_path):
     gold = tmp_path / "gold"
     gold_run(cohort, gold)
-    requests, reference, fingerprint = load_gold(gold)
+    requests, reference, fingerprint, _ = load_gold(gold)
     Path(cohort[0].provenance.source_file).unlink()
     candidates = [settings(), settings("ollama")]
     factory = FakeFactory(lambda model, request: "not JSON" if model.provider == "ollama" and request.paragraph_idx else content(request))
@@ -305,7 +338,7 @@ def test_output_locks_and_atomic_replacement_preserve_saved_state(tmp_path, monk
 def test_offline_report_rejects_changed_candidate_evidence(cohort, tmp_path, corruption):
     gold = tmp_path / "gold"
     gold_run(cohort, gold)
-    requests, reference, fingerprint = load_gold(gold)
+    requests, reference, fingerprint, _ = load_gold(gold)
     output = tmp_path / "candidates"
     run_extraction(requests, [settings("ollama")], output, kind="candidate", reference=reference,
                    gold_fingerprint=fingerprint, provider_factory=FakeFactory(), show_progress=False)
@@ -422,3 +455,536 @@ def test_all_readme_and_reference_commands_parse_and_document_every_flag():
                 assert raised.value.code == 0
             else:
                 parser.parse_args(arguments)
+
+
+@pytest.fixture
+def append_cli(tmp_path, monkeypatch):
+    """A real 180-paragraph source spanning records, with mocked providers only."""
+    import graphrag_pipeline.extraction_benchmark.command as command
+
+    source = tmp_path / "source.jsonl"
+    source.write_text("\n".join(json.dumps({
+        "id": name, "paragraphs": [
+            {"idx": i, "title": name, "paragraph_text": "Alice met Bob."}
+            for i in reversed(range(count))],
+    }) for name, count in (("first", 120), ("second", 60))) + "\n", encoding="utf-8")
+    factory = FakeFactory()
+    monkeypatch.setattr(command, "run_extraction", lambda *args, **kwargs: run_extraction(
+        *args, **kwargs, provider_factory=factory))
+    output = tmp_path / "gold"
+    arguments = ["gold", "--dataset-path", str(source), "--model", "gold",
+                 "--reasoning-effort", "high", "--output", str(output), "--no-progress"]
+
+    def invoke(*extra):
+        return execute(build_parser().parse_args([*arguments, *extra]))
+    return source, output, factory, invoke
+
+
+def snapshots(directory):
+    return {path.name: path.read_bytes() for path in directory.iterdir()}
+
+
+@pytest.mark.parametrize("selector", [
+    ["--additional-paragraphs", "30"],
+    ["--start-paragraph", "151", "--end-paragraph", "180"],
+])
+def test_cli_append_150_to_180_reuses_every_saved_extraction(append_cli, selector):
+    source, output, factory, invoke = append_cli
+    assert invoke("--paragraphs", "150")[0] == 0
+    before = snapshots(output)
+    original = read_jsonl(output / "gold.jsonl")
+    factory.calls.clear()
+    factory.checks.clear()
+    code, preview = invoke(*selector, "--dry-run")
+    assert code == 0 and preview["paragraphs"] == 180
+    assert preview["append"] == {"previous_paragraphs": 150, "additional_paragraphs": 30,
+                                 "start_paragraph": 151, "end_paragraph": 180}
+    assert snapshots(output) == before and factory.calls == factory.checks == []
+
+    code, summary = invoke(*selector)
+    assert code == 0 and summary["successful"]
+    expected = load_paragraphs(source, count=180)
+    assert factory.calls == [("openrouter:gold", r.chunk_id) for r in expected[150:]]
+    assert read_jsonl(output / "gold.jsonl")[:150] == original
+    assert all(row["attempts"] == 1 for row in read_jsonl(output / "gold.jsonl"))
+    assert load_gold(output)[0] == expected
+    manifest = read_json(output / "manifest.json")
+    previous = json.loads(before["manifest.json"])
+    assert manifest["run_id"] == previous["run_id"] and manifest["created_at"] == previous["created_at"]
+    assert summary["models"]["openrouter:gold"]["expected"] == 180
+    assert {"output": str(output), **report(output)} == summary
+    assert not (output / APPEND_TRANSACTION).exists()
+
+
+@pytest.mark.parametrize("selector, message", [
+    (["--start-paragraph", "150", "--end-paragraph", "180"], "start at paragraph 151"),
+    (["--start-paragraph", "152", "--end-paragraph", "180"], "start at paragraph 151"),
+    (["--start-paragraph", "151", "--end-paragraph", "150"], "end >= start"),
+    (["--start-paragraph", "0", "--end-paragraph", "180"], "positive"),
+    (["--start-paragraph", "151", "--end-paragraph", "181"], "contains only 180"),
+    (["--start-paragraph", "151"], "requires positive"),
+    (["--end-paragraph", "180"], "requires positive"),
+    (["--additional-paragraphs", "0"], "must be positive"),
+    (["--additional-paragraphs", "-1"], "must be positive"),
+    (["--additional-paragraphs", "30", "--end-paragraph", "180"], "cannot be combined"),
+    (["--additional-paragraphs", "30", "--paragraphs", "180"], "cannot be combined"),
+])
+def test_invalid_append_selection_changes_nothing(append_cli, selector, message):
+    _, output, factory, invoke = append_cli
+    invoke("--paragraphs", "150")
+    before = snapshots(output)
+    factory.calls.clear()
+    factory.checks.clear()
+    with pytest.raises(ValueError, match=message):
+        invoke(*selector)
+    assert snapshots(output) == before and factory.calls == factory.checks == []
+
+
+def test_append_requires_existing_output_and_mutually_exclusive_selectors(append_cli):
+    _, output, _, invoke = append_cli
+    with pytest.raises(ValueError, match="existing benchmark run"):
+        invoke("--additional-paragraphs", "30")
+    assert not output.exists()
+    with pytest.raises(SystemExit):
+        invoke("--additional-paragraphs", "30", "--start-paragraph", "151", "--end-paragraph", "180")
+
+
+@pytest.mark.parametrize("change", ["settings", "source"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_append_checks_source_and_settings_before_writes_or_calls(append_cli, change, dry_run):
+    source, output, factory, invoke = append_cli
+    invoke("--paragraphs", "150")
+    before = snapshots(output)
+    extra = ["--additional-paragraphs", "30"]
+    if change == "settings":
+        extra.extend(["--max-tokens", "12"])
+    else:
+        # Even an unchanged selected prefix cannot be mixed with a new source hash.
+        source.write_bytes(source.read_bytes() + b"\n")
+    if dry_run:
+        extra.append("--dry-run")
+    factory.calls.clear()
+    factory.checks.clear()
+    with pytest.raises(ValueError, match="configuration/source mismatch"):
+        invoke(*extra)
+    assert snapshots(output) == before and factory.calls == factory.checks == []
+
+
+@pytest.mark.parametrize("retry", [False, True])
+def test_append_preserves_failures_unless_explicitly_retried(append_cli, retry):
+    source, output, factory, invoke = append_cli
+    first = load_paragraphs(source, count=1)[0].chunk_id
+    factory.behavior = lambda model, request: "malformed" if request.chunk_id == first else content(request)
+    invoke("--paragraphs", "150")
+    original = read_jsonl(output / "gold.jsonl")
+    factory.behavior = None
+    factory.calls.clear()
+    code, summary = invoke("--additional-paragraphs", "30", *(["--resume", "--retry-failed"] if retry else []))
+    assert code == (0 if retry else 1) and summary["complete"]
+    saved = read_jsonl(output / "gold.jsonl")
+    assert saved[1:150] == original[1:]
+    assert len(factory.calls) == (31 if retry else 30)
+    if retry:
+        assert saved[0]["status"] == "succeeded" and saved[0]["attempts"] == 2
+    else:
+        assert saved[0] == original[0]
+    with pytest.raises(ValueError, match="requires --resume"):
+        invoke("--additional-paragraphs", "1", "--retry-failed")
+
+
+def test_interrupted_append_resumes_the_expanded_cohort(append_cli):
+    source, output, factory, invoke = append_cli
+    invoke("--paragraphs", "150")
+    expected = load_paragraphs(source, count=180)
+    def interrupt(model, request):
+        if request == expected[151]:
+            raise KeyboardInterrupt
+        return content(request)
+    factory.behavior = interrupt
+    with pytest.raises(KeyboardInterrupt):
+        invoke("--additional-paragraphs", "30")
+    before = read_jsonl(output / "gold.jsonl")
+    assert len(before) == 151
+    factory.calls.clear()
+    factory.checks.clear()
+    with pytest.raises(ValueError, match="pending paragraphs"):
+        invoke("--additional-paragraphs", "1")
+    assert factory.calls == factory.checks == []
+    factory.behavior = None
+    assert invoke("--paragraphs", "180", "--resume")[0] == 0
+    assert factory.calls == [("openrouter:gold", r.chunk_id) for r in expected[151:]]
+    assert read_jsonl(output / "gold.jsonl")[:151] == before
+
+
+@pytest.mark.parametrize("selector", [
+    ["--additional-paragraphs", "30"],
+    ["--start-paragraph", "151", "--end-paragraph", "180"],
+])
+def test_candidate_append_extends_frozen_gold_and_all_models(append_cli, tmp_path, selector):
+    source, gold, factory, invoke = append_cli
+    invoke("--paragraphs", "150")
+    output = tmp_path / "candidate"
+    arguments = ["run", "--gold", str(gold), "--output", str(output),
+                 "--model", "ollama:qwen:4b", "--model", "openrouter:candidate", "--no-progress"]
+    parser = build_parser()
+    assert execute(parser.parse_args(arguments))[0] == 0
+    original = read_jsonl(output / "predictions.jsonl")
+    frozen = read_jsonl(output / "reference.jsonl")
+    before = snapshots(output)
+    factory.calls.clear()
+    factory.checks.clear()
+    with pytest.raises(ValueError, match="gold cohort contains only 150"):
+        execute(parser.parse_args([*arguments, *selector]))
+    assert snapshots(output) == before and factory.calls == factory.checks == []
+    invoke("--additional-paragraphs", "30")
+    source.unlink()
+    factory.calls.clear()
+    code, summary = execute(parser.parse_args([*arguments, *selector]))
+    assert code == 0 and len(factory.calls) == 60
+    assert read_jsonl(output / "predictions.jsonl")[:300] == original
+    assert read_jsonl(output / "reference.jsonl")[:150] == frozen
+    assert all(model["expected"] == 180 and model["micro"]["entities"]["f1"] == 1
+               for model in summary["models"].values())
+    assert {"output": str(output), **report(output)} == summary
+    factory.calls.clear()
+    factory.checks.clear()
+    assert execute(parser.parse_args([*arguments, "--resume"]))[0] == 0
+    assert factory.calls == factory.checks == []
+
+
+def test_candidate_append_can_use_a_prefix_of_larger_gold(append_cli, tmp_path):
+    source, gold, factory, invoke = append_cli
+    invoke("--paragraphs", "150")
+    output = tmp_path / "candidate"
+    arguments = ["run", "--gold", str(gold), "--output", str(output), "--model", "ollama:qwen:4b", "--no-progress"]
+    parser = build_parser()
+    execute(parser.parse_args(arguments))
+    invoke("--additional-paragraphs", "30")
+    expected = load_paragraphs(source, count=180)
+    def interrupt(model, request):
+        if request == expected[151]:
+            raise KeyboardInterrupt
+        return content(request)
+    factory.behavior = interrupt
+    with pytest.raises(KeyboardInterrupt):
+        execute(parser.parse_args([*arguments, "--additional-paragraphs", "10"]))
+    factory.behavior = None
+    factory.calls.clear()
+    assert execute(parser.parse_args([*arguments, "--resume"]))[0] == 0
+    assert factory.calls == [("ollama:qwen:4b", r.chunk_id) for r in expected[151:160]]
+    assert read_json(output / "manifest.json")["configuration"]["paragraphs"] == 160
+
+
+def test_candidate_append_rejects_changed_existing_gold(cohort, tmp_path):
+    gold = tmp_path / "gold"
+    gold_run(cohort[:1], gold)
+    requests, reference, fingerprint, _ = load_gold(gold)
+    output = tmp_path / "candidate"
+    models = [settings("ollama")]
+    run_extraction(requests, models, output, kind="candidate", reference=reference,
+                   gold_fingerprint=fingerprint, provider_factory=FakeFactory(), show_progress=False)
+    gold_run(cohort, gold, append_start=2)
+    rows = read_jsonl(gold / "gold.jsonl")
+    changed = payload(cohort[0])
+    changed["mentions"][0]["entity_type"] = "Organization"
+    rows[0]["raw_content"] = json.dumps(changed)
+    rows[0]["result"] = validate_extraction_response(cohort[0], rows[0]["raw_content"]).model_dump(mode="json")
+    write_jsonl(gold / "gold.jsonl", rows)
+    requests, reference, fingerprint, _ = load_gold(gold)
+    factory = FakeFactory()
+    before = snapshots(output)
+    with pytest.raises(ValueError, match="existing gold labels must be unchanged"):
+        run_extraction(requests, models, output, kind="candidate", reference=reference,
+                       gold_fingerprint=fingerprint, append_start=2, provider_factory=factory)
+    assert snapshots(output) == before and factory.calls == factory.checks == []
+
+
+@pytest.mark.parametrize("target, after_replace, use_report", [
+    ("cohort.jsonl", False, False), ("reference.jsonl", False, True),
+    ("manifest.json", False, False), ("manifest.json", True, True),
+])
+@pytest.mark.parametrize("skip_new", [False, True])
+def test_append_metadata_commit_recovers_at_each_write_boundary(cohort, tmp_path, monkeypatch, target, after_replace, use_report, skip_new):
+    import graphrag_pipeline.extraction_benchmark.artifacts as artifacts
+
+    output = tmp_path / "candidate"
+    models = [settings("ollama")]
+    reference = {r.chunk_id: validate_extraction_response(r, content(r)) for r in cohort}
+    run_extraction(cohort[:1], models, output, kind="candidate", reference=reference,
+                   gold_fingerprint="old", provider_factory=FakeFactory(), show_progress=False)
+    original = read_jsonl(output / "predictions.jsonl")
+    skipped = []
+    if skip_new:
+        del reference[cohort[1].chunk_id]
+        skipped = [{"chunk_id": cohort[1].chunk_id, "reason": "gold_failed", "error_type": "ValidationError"}]
+    replace_file = artifacts.os.replace
+    def fail(source, destination):
+        if Path(destination).name == target:
+            if after_replace:
+                replace_file(source, destination)
+            raise OSError("interrupted append commit")
+        return replace_file(source, destination)
+    factory = FakeFactory()
+    with monkeypatch.context() as patch:
+        patch.setattr(artifacts.os, "replace", fail)
+        with pytest.raises(OSError, match="interrupted append commit"):
+            run_extraction(cohort, models, output, kind="candidate", reference=reference,
+                           gold_fingerprint="new", skipped_gold=skipped,
+                           append_start=2, provider_factory=factory, show_progress=False)
+    assert (output / APPEND_TRANSACTION).exists()
+    assert factory.calls == factory.checks == []
+    before = snapshots(output)
+    assert load_run(output)[1] == cohort
+    preview = run_extraction(cohort, models, output, kind="candidate", reference=reference,
+                             gold_fingerprint="new", skipped_gold=skipped, resume=True, dry_run=True, provider_factory=factory)
+    assert preview["models"]["ollama:qwen:4b"]["pending"] == int(not skip_new)
+    assert preview["skipped_gold"] == skipped
+    assert snapshots(output) == before
+    if use_report:
+        summary = report(output)
+        assert summary["models"]["ollama:qwen:4b"]["pending"] == int(not skip_new)
+        assert summary["skipped_gold"] == skipped
+        assert not (output / APPEND_TRANSACTION).exists()
+    assert run_extraction(cohort, models, output, kind="candidate", reference=reference,
+                          gold_fingerprint="new", skipped_gold=skipped,
+                          resume=True, provider_factory=factory, show_progress=False)["successful"]
+    assert factory.calls == ([] if skip_new else [("ollama:qwen:4b", cohort[1].chunk_id)])
+    assert read_jsonl(output / "predictions.jsonl")[0] == original[0]
+    assert not (output / APPEND_TRANSACTION).exists()
+
+
+def test_candidate_append_keeps_failed_predictions_in_micro_scores(cohort, tmp_path):
+    output = tmp_path / "candidate"
+    models = [settings("ollama")]
+    reference = {r.chunk_id: validate_extraction_response(r, content(r)) for r in cohort}
+    run_extraction(cohort[:1], models, output, kind="candidate", reference=reference,
+                   gold_fingerprint="old", provider_factory=FakeFactory(lambda model, request: "invalid"), show_progress=False)
+    original = read_jsonl(output / "predictions.jsonl")[0]
+    factory = FakeFactory()
+    summary = run_extraction(cohort, models, output, kind="candidate", reference=reference,
+                             gold_fingerprint="new", append_start=2, provider_factory=factory, show_progress=False)
+    local = summary["models"]["ollama:qwen:4b"]
+    assert summary["complete"] and not summary["successful"] and local["failed"] == 1
+    assert local["micro"]["entities"]["recall"] == 0.5
+    assert local["micro"]["entities"]["precision"] == 1
+    assert read_jsonl(output / "predictions.jsonl")[0] == original
+    assert factory.calls == [("ollama:qwen:4b", cohort[1].chunk_id)]
+
+
+def test_cli_compares_50_of_180_and_reports_130_gold_failures_offline(append_cli, tmp_path):
+    source, gold, factory, invoke = append_cli
+    cohort = load_paragraphs(source, count=180)
+    failed_ids = {r.chunk_id for r in cohort[:130]}
+    factory.behavior = lambda model, request: "malformed" if request.chunk_id in failed_ids else content(request)
+    assert invoke("--paragraphs", "180")[0] == 1
+    factory.behavior = None
+    factory.calls.clear()
+    factory.checks.clear()
+    source.unlink()
+    output = tmp_path / "candidate"
+    parser = build_parser()
+    arguments = ["run", "--gold", str(gold), "--output", str(output), "--no-progress",
+                 "--model", "ollama:qwen:4b", "--model", "openrouter:candidate"]
+    code, preview = execute(parser.parse_args([*arguments, "--dry-run"]))
+    assert code == 0 and preview["requested"] == 180 and preview["comparable"] == 50
+    assert preview["skipped"] == 130 and not output.exists()
+    assert factory.calls == factory.checks == []
+
+    code, summary = execute(parser.parse_args(arguments))
+    assert code == 0 and summary["complete"] and summary["successful"]
+    assert summary["requested"] == 180 and summary["comparable"] == 50 and summary["skipped"] == 130
+    assert summary["skipped_gold"] == [
+        {"chunk_id": r.chunk_id, "reason": "gold_failed", "error_type": "ValidationError"}
+        for r in cohort[:130]]
+    assert "message" not in json.dumps(summary["skipped_gold"])
+    assert factory.calls == [(spec, r.chunk_id) for spec in ("ollama:qwen:4b", "openrouter:candidate")
+                             for r in cohort[130:]]
+    for model in summary["models"].values():
+        assert model["expected"] == model["attempted"] == model["compared"] == 50
+        assert model["failed"] == model["pending"] == 0
+        assert model["micro"]["entities"]["f1"] == model["micro"]["relations"]["f1"] == 1
+    assert len(read_jsonl(output / "cohort.jsonl")) == 180
+    assert len(read_jsonl(output / "reference.jsonl")) == 50
+    assert read_json(output / "manifest.json")["configuration"]["skipped_gold"] == summary["skipped_gold"]
+    for path in gold.iterdir():
+        path.unlink()
+    gold.rmdir()
+    assert {"output": str(output), **report(output)} == summary
+
+
+@pytest.mark.parametrize("gold_status", ["failed", "missing"])
+def test_all_unusable_gold_completes_without_provider_calls(cohort, tmp_path, monkeypatch, gold_status):
+    import graphrag_pipeline.extraction_benchmark.command as command
+
+    gold = tmp_path / "gold"
+    if gold_status == "failed":
+        gold_run(cohort, gold, FakeFactory(lambda model, request: "invalid"))
+    else:
+        def interrupt(model, request):
+            raise KeyboardInterrupt
+        with pytest.raises(KeyboardInterrupt):
+            gold_run(cohort, gold, FakeFactory(interrupt))
+    factory = FakeFactory()
+    monkeypatch.setattr(command, "run_extraction", lambda *args, **kwargs: run_extraction(
+        *args, **kwargs, provider_factory=factory))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    parser = build_parser()
+    output = tmp_path / "candidate"
+    arguments = ["run", "--gold", str(gold), "--output", str(output), "--no-progress",
+                 "--model", "ollama:qwen:4b", "--model", "openrouter:candidate"]
+    code, summary = execute(parser.parse_args(arguments))
+    assert code == 0 and summary["complete"] and summary["successful"]
+    assert summary["requested"] == summary["skipped"] == 2 and summary["comparable"] == 0
+    assert [skip["reason"] for skip in summary["skipped_gold"]] == [f"gold_{gold_status}"] * 2
+    for model in summary["models"].values():
+        assert model["expected"] == model["attempted"] == model["compared"] == model["failed"] == model["pending"] == 0
+        assert model["micro"]["entities"]["f1"] == 0
+    assert factory.calls == factory.checks == []
+    assert read_jsonl(output / "reference.jsonl") == read_jsonl(output / "predictions.jsonl") == []
+    assert not (output / "preflight.json").exists()
+    before = snapshots(output)
+    assert execute(parser.parse_args([*arguments, "--resume"]))[1] == summary
+    assert snapshots(output) == before
+    assert factory.calls == factory.checks == []
+    assert execute(parser.parse_args(["report", "--input", str(output)]))[1] == summary
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_partial_gold_candidate_resume_and_retry_skip_only_gold_failures(cohort, tmp_path, monkeypatch, interrupted):
+    import graphrag_pipeline.extraction_benchmark.command as command
+
+    gold = tmp_path / "gold"
+    gold_run(cohort, gold, FakeFactory(lambda model, request: "invalid" if request == cohort[0] else content(request)))
+    def fail(model, request):
+        if interrupted:
+            raise KeyboardInterrupt
+        return "invalid"
+    factory = FakeFactory(fail)
+    monkeypatch.setattr(command, "run_extraction", lambda *args, **kwargs: run_extraction(
+        *args, **kwargs, provider_factory=factory))
+    output = tmp_path / "candidate"
+    parser = build_parser()
+    arguments = ["run", "--gold", str(gold), "--output", str(output),
+                 "--model", "ollama:qwen:4b", "--no-progress"]
+    if interrupted:
+        with pytest.raises(KeyboardInterrupt):
+            execute(parser.parse_args(arguments))
+    else:
+        code, failed = execute(parser.parse_args(arguments))
+        assert code == 1 and failed["models"]["ollama:qwen:4b"]["failed"] == 1
+        assert failed["models"]["ollama:qwen:4b"]["micro"]["entities"]["fn"] == 2
+    before = report(output)
+    assert before["models"]["ollama:qwen:4b"]["pending"] == int(interrupted)
+    factory.behavior = None
+    factory.calls.clear()
+    code, summary = execute(parser.parse_args([*arguments, "--resume", "--retry-failed"]))
+    assert code == 0 and summary["skipped_gold"] == before["skipped_gold"]
+    assert summary["models"]["ollama:qwen:4b"]["micro"]["entities"]["f1"] == 1
+    assert factory.calls == [("ollama:qwen:4b", cohort[1].chunk_id)]
+
+    # Repairing gold must not silently add a previously skipped paragraph.
+    gold_run(cohort, gold, resume=True, retry_failed=True)
+    before_files = snapshots(output)
+    factory.calls.clear()
+    factory.checks.clear()
+    with pytest.raises(ValueError, match="resume configuration/source/gold mismatch"):
+        execute(parser.parse_args([*arguments, "--resume"]))
+    assert factory.calls == factory.checks == [] and snapshots(output) == before_files
+
+
+@pytest.mark.parametrize("all_new_skipped", [False, True])
+def test_partial_gold_append_uses_source_positions_and_freezes_skip_set(append_cli, tmp_path, all_new_skipped):
+    source, gold, factory, invoke = append_cli
+    cohort = load_paragraphs(source, count=180)
+    failed_ids = {cohort[0].chunk_id, cohort[149].chunk_id}
+    failed_ids.update(r.chunk_id for r in (cohort[150:] if all_new_skipped else cohort[150::2]))
+    gold_behavior = lambda model, request: "invalid" if request.chunk_id in failed_ids else content(request)
+    factory.behavior = gold_behavior
+    invoke("--paragraphs", "150")
+    factory.behavior = None
+    parser = build_parser()
+    output = tmp_path / "candidate"
+    arguments = ["run", "--gold", str(gold), "--output", str(output),
+                 "--model", "ollama:qwen:4b", "--no-progress"]
+    assert execute(parser.parse_args(arguments))[0] == 0
+    original = read_jsonl(output / "predictions.jsonl")
+    frozen_skips = report(output)["skipped_gold"]
+    factory.behavior = gold_behavior
+    invoke("--additional-paragraphs", "30")
+    factory.behavior = None
+    factory.calls.clear()
+    factory.checks.clear()
+    code, summary = execute(parser.parse_args([*arguments, "--start-paragraph", "151", "--end-paragraph", "180"]))
+    assert code == 0 and summary["requested"] == 180
+    assert summary["comparable"] == (148 if all_new_skipped else 163)
+    assert summary["skipped_gold"][:2] == frozen_skips
+    assert read_jsonl(output / "predictions.jsonl")[:148] == original
+    assert factory.calls == [("ollama:qwen:4b", r.chunk_id) for r in cohort[150:] if r.chunk_id not in failed_ids]
+    if all_new_skipped:
+        assert factory.checks == []
+    assert {"output": str(output), **report(output)} == summary
+
+
+def test_candidate_append_rejects_changes_to_previously_skipped_gold(cohort, tmp_path):
+    gold = tmp_path / "gold"
+    gold_run(cohort[:1], gold, FakeFactory(lambda model, request: "invalid"))
+    requests, reference, fingerprint, skipped = load_gold(gold)
+    output = tmp_path / "candidate"
+    models = [settings("ollama")]
+    run_extraction(requests, models, output, kind="candidate", reference=reference,
+                   gold_fingerprint=fingerprint, skipped_gold=skipped, provider_factory=FakeFactory(), show_progress=False)
+    gold_run(cohort, gold, append_start=2, resume=True, retry_failed=True)
+    requests, reference, fingerprint, skipped = load_gold(gold)
+    factory = FakeFactory()
+    before = snapshots(output)
+    with pytest.raises(ValueError, match="including skipped gold"):
+        run_extraction(requests, models, output, kind="candidate", reference=reference,
+                       gold_fingerprint=fingerprint, skipped_gold=skipped,
+                       append_start=2, provider_factory=factory, show_progress=False)
+    assert snapshots(output) == before and factory.calls == factory.checks == []
+
+
+def test_all_skipped_candidate_can_append_usable_gold(cohort, tmp_path, monkeypatch):
+    import graphrag_pipeline.extraction_benchmark.command as command
+
+    gold = tmp_path / "gold"
+    gold_run(cohort[:1], gold, FakeFactory(lambda model, request: "invalid"))
+    factory = FakeFactory()
+    monkeypatch.setattr(command, "run_extraction", lambda *args, **kwargs: run_extraction(
+        *args, **kwargs, provider_factory=factory))
+    parser = build_parser()
+    output = tmp_path / "candidate"
+    arguments = ["run", "--gold", str(gold), "--output", str(output),
+                 "--model", "ollama:qwen:4b", "--no-progress"]
+    assert execute(parser.parse_args(arguments))[0] == 0
+    assert factory.calls == factory.checks == []
+    gold_run(cohort, gold, append_start=2)
+    code, summary = execute(parser.parse_args([*arguments, "--additional-paragraphs", "1"]))
+    assert code == 0 and summary["requested"] == 2 and summary["skipped"] == summary["comparable"] == 1
+    assert factory.calls == [("ollama:qwen:4b", cohort[1].chunk_id)]
+    assert summary["models"]["ollama:qwen:4b"]["micro"]["entities"]["f1"] == 1
+    assert {"output": str(output), **report(output)} == summary
+
+
+@pytest.mark.parametrize("corruption", ["prediction", "duplicate_skip", "unknown_skip", "missing_skip", "error_type"])
+def test_offline_report_rejects_inconsistent_partial_gold_artifacts(cohort, tmp_path, corruption):
+    gold = tmp_path / "gold"
+    gold_run(cohort, gold, FakeFactory(lambda model, request: "invalid" if request == cohort[0] else content(request)))
+    requests, reference, fingerprint, skipped = load_gold(gold)
+    output = tmp_path / "candidate"
+    run_extraction(requests, [settings("ollama")], output, kind="candidate", reference=reference,
+                   gold_fingerprint=fingerprint, skipped_gold=skipped, provider_factory=FakeFactory(), show_progress=False)
+    if corruption == "prediction":
+        rows = read_jsonl(output / "predictions.jsonl")
+        rows[0]["chunk_id"] = cohort[0].chunk_id
+        write_jsonl(output / "predictions.jsonl", rows)
+    else:
+        manifest = read_json(output / "manifest.json")
+        skips = manifest["configuration"]["skipped_gold"]
+        if corruption == "duplicate_skip": skips.append(dict(skips[0]))
+        elif corruption == "unknown_skip": skips[0]["chunk_id"] = "unknown"
+        elif corruption == "missing_skip": skips.clear()
+        else: skips[0]["error_type"] = None
+        (output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError):
+        report(output)

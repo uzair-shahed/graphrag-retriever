@@ -130,7 +130,23 @@ uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_
 
 Resume skips saved attempts. `--retry-failed` also retries failures while
 preserving successful rows. Changed settings or source content require a new
-output directory. Candidate evaluation requires complete successful gold.
+output directory. Candidate evaluation skips failed or missing gold labels and
+records their paragraph IDs and failure types in its report.
+
+To extend an existing 150-paragraph gold run to 180, repeat its settings and
+use **one** of these equivalent append selectors:
+
+```sh
+uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --additional-paragraphs 30
+uv run --locked graphrag-extraction-benchmark gold --model YOUR_REASONING_MODEL_ID --reasoning-effort high --max-tokens 32768 --output runs/entity-extraction/gold-150 --start-paragraph 151 --end-paragraph 180
+```
+
+Positions count individual paragraphs in source order and both range endpoints
+are inclusive. Append requires a fully attempted saved cohort and the same
+source/configuration. It preserves saved attempts and processes new paragraphs;
+add `--resume --retry-failed` to retry failures too. Use `--dry-run` to preview.
+After interruption, resume with the expanded total (`--paragraphs 180 --resume`)
+instead of appending another N. See the complete reference for recovery details.
 
 ### Choose Ollama, OpenRouter, or both for candidates
 
@@ -160,12 +176,25 @@ support depend on your endpoint. For reasoning-capable hosted candidates, add
 use the model default. Ollama accepts `--ollama-think default`, `true`, `false`,
 or a model-supported string. Use separate runs to compare the same model under
 different settings. Candidate runs support `--dry-run`, `--resume` and
-`--retry-failed` too.
+`--retry-failed` too. After extending the gold cohort, the same append selectors
+extend an existing candidate run, preserving frozen labels and scores for its
+previous paragraphs. Candidate resume uses its saved cohort size, including
+when the supplied gold cohort is larger.
 
 Each candidate receives title/text and the same structured schema, without gold
 labels. Per-paragraph and micro scores include failed predictions as empty sets.
+Only paragraphs with successful validated gold labels receive candidate calls.
+For 180 requested paragraphs with 130 failed gold extractions, each candidate
+compares the remaining 50. Summaries show `requested`, `comparable`, `skipped`,
+the `skipped_gold` list, and each model's `compared` count. Skipped gold does not
+count as candidate failure or pending work. If no usable gold remains, the run
+completes with zero comparisons and zero model calls; its zero metrics represent
+an empty scoring population.
+
 Artifacts include `manifest.json`, `cohort.jsonl`, `gold.jsonl` or
-`predictions.jsonl`, and `summary.json`; candidate runs freeze a local gold copy.
+`predictions.jsonl`, and `summary.json`; candidate runs freeze a local gold copy
+and skip list for offline reporting. Resume requires the same gold snapshot.
+Use a new candidate output directory after repairing previously skipped gold.
 
 ### Offline summaries and all flags
 
@@ -179,11 +208,14 @@ uv run --locked graphrag-extraction-benchmark report --input runs/entity-extract
 | --- | --- | --- |
 | `--dataset-path PATH` | `select`, `gold` | MuSiQue dev JSONL path above. |
 | `--paragraphs N` | `select`, `gold` | `150`; positive paragraph count. |
+| `--additional-paragraphs N` | `gold`, `run` | Append the next N paragraphs; cannot combine with ranges or `--paragraphs`. |
+| `--start-paragraph S` | `gold`, `run` | First new 1-based paragraph position; must follow the saved cohort and requires `--end-paragraph`. |
+| `--end-paragraph E` | `gold`, `run` | Inclusive last paragraph position; requires `--start-paragraph`, E >= S. |
 | `--model MODEL` | `gold` | Required OpenRouter model ID. |
 | `--model PROVIDER:MODEL` | `run` | Required, repeatable; `ollama` or `openrouter`. |
 | `--reasoning-effort LEVEL` | `gold`, `run` | Required for gold: `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Optional for candidates, also allowing `none`; omitted uses model default. |
 | `--ollama-think VALUE` | `run` | `default`, `true`, `false`, or model-supported string. |
-| `--gold DIR` | `run` | Required complete gold run directory. |
+| `--gold DIR` | `run` | Required gold run directory; failed/missing labels are skipped and reported. |
 | `--output DIR` | `gold`, `run` | Required new/empty directory, or matching existing run with `--resume`. |
 | `--max-tokens N` | `gold`, `run` | `16384`; positive output budget including reasoning where applicable. |
 | `--timeout SECONDS` | `gold`, `run` | `180`; positive finite per-request timeout. |

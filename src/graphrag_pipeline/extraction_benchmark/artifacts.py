@@ -19,6 +19,7 @@ from graphrag_pipeline.extraction_benchmark.providers import SYSTEM_PROMPT, pars
 from graphrag_pipeline.extraction_benchmark.scoring import SCORING_VERSION, score
 
 FORMAT_VERSION = 1
+APPEND_TRANSACTION = ".append-transaction.json"
 
 
 def now() -> str:
@@ -117,6 +118,34 @@ class SavedExtraction(BaseModel):
         return self
 
 
+class SkippedGold(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_id: str = Field(min_length=1)
+    reason: Literal["gold_failed", "gold_missing"]
+    error_type: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_reason(self):
+        if (self.reason == "gold_failed") != (self.error_type is not None):
+            raise ValueError("failed gold needs an error type; missing gold has no error type")
+        return self
+
+
+def validate_gold_coverage(requests, reference, skipped_gold):
+    """Every requested paragraph has exactly one usable label or skip record."""
+    ids = {request.chunk_id for request in requests}
+    skips = [SkippedGold.model_validate(raw) for raw in skipped_gold]
+    by_id = {skip.chunk_id: skip for skip in skips}
+    if (len(by_id) != len(skips) or set(by_id) & set(reference)
+            or set(by_id) | set(reference) != ids):
+        raise ValueError("gold reference/skip coverage mismatch or duplicate skipped paragraph")
+    for request in requests:
+        if request.chunk_id in reference:
+            validate_result_for_request(request, reference[request.chunk_id])
+    return [by_id[r.chunk_id].model_dump(mode="json") for r in requests if r.chunk_id in by_id]
+
+
 def validate_rows(raw_rows, requests, model_specs, *, reference=None) -> dict[tuple[str, str], SavedExtraction]:
     by_id = {request.chunk_id: request for request in requests}
     rows = {}
@@ -125,6 +154,8 @@ def validate_rows(raw_rows, requests, model_specs, *, reference=None) -> dict[tu
         key = (row.model, row.chunk_id)
         if row.model not in model_specs or row.chunk_id not in by_id or key in rows:
             raise ValueError("unknown model/chunk or duplicate saved extraction")
+        if reference is not None and row.chunk_id not in reference:
+            raise ValueError("saved prediction has no usable gold label")
         request = by_id[row.chunk_id]
         if row.result is not None:
             validate_result_for_request(request, row.result)
@@ -140,12 +171,25 @@ def validate_rows(raw_rows, requests, model_specs, *, reference=None) -> dict[tu
 
 def load_run(directory: Path):
     manifest = read_json(directory / "manifest.json")
+    transaction_path = directory / APPEND_TRANSACTION
+    transaction = read_json(transaction_path) if transaction_path.exists() else None
+    if transaction is not None:
+        target = transaction["manifest"]
+        if (transaction.get("format_version") != FORMAT_VERSION
+                or digest(manifest) not in {transaction["previous_manifest_sha256"], digest(target)}
+                or target.get("run_id") != manifest.get("run_id")
+                or target.get("kind") != manifest.get("kind")):
+            raise ValueError("invalid append transaction; saved manifest differs")
+        # Read the committed target snapshot even if only some files were replaced.
+        # Reading (including --dry-run) never repairs or writes artifacts.
+        manifest = target
     if manifest.get("format_version") != FORMAT_VERSION or manifest.get("kind") not in {"gold", "candidate"}:
         raise ValueError("unsupported benchmark manifest")
     config = manifest["configuration"]
     if config.get("scoring_version") != SCORING_VERSION:
         raise ValueError("unsupported scoring version")
-    requests = [ExtractionRequest.model_validate(raw) for raw in read_jsonl(directory / "cohort.jsonl")]
+    raw_cohort = transaction["cohort"] if transaction is not None else read_jsonl(directory / "cohort.jsonl")
+    requests = [ExtractionRequest.model_validate(raw) for raw in raw_cohort]
     cohort = [request.model_dump(mode="json") for request in requests]
     if not requests or len(requests) != config["paragraphs"] or len({r.chunk_id for r in requests}) != len(requests) or digest(cohort) != config["cohort_sha256"]:
         raise ValueError("cohort count/identity/checksum mismatch")
@@ -156,20 +200,50 @@ def load_run(directory: Path):
         parse_model(spec)
     reference = None
     if manifest["kind"] == "candidate":
-        raw_reference = read_jsonl(directory / "reference.jsonl")
+        raw_reference = transaction["reference"] if transaction is not None else read_jsonl(directory / "reference.jsonl")
         if digest(raw_reference) != config["reference_sha256"]:
             raise ValueError("frozen reference checksum mismatch")
         reference = {}
-        for raw, request in zip(raw_reference, requests, strict=True):
+        skipped_gold = config.get("skipped_gold", [])
+        skipped_ids = {SkippedGold.model_validate(raw).chunk_id for raw in skipped_gold}
+        eligible = [request for request in requests if request.chunk_id not in skipped_ids]
+        for raw, request in zip(raw_reference, eligible, strict=True):
             result = ExtractionResult.model_validate(raw)
             validate_result_for_request(request, result)
             reference[request.chunk_id] = result
+        if validate_gold_coverage(requests, reference, skipped_gold) != skipped_gold:
+            raise ValueError("skipped gold must follow cohort order")
     path = directory / ("gold.jsonl" if manifest["kind"] == "gold" else "predictions.jsonl")
     rows = validate_rows(read_jsonl(path) if path.exists() else [], requests, specs, reference=reference)
     return manifest, requests, rows, reference
 
 
+def recover_append(directory: Path):
+    """Finish an interrupted metadata commit. Caller must hold the run lock."""
+    journal = directory / APPEND_TRANSACTION
+    if not journal.exists():
+        return
+    manifest, requests, _, reference = load_run(directory)
+    write_jsonl(directory / "cohort.jsonl", [request.model_dump(mode="json") for request in requests])
+    if reference is not None:
+        write_jsonl(directory / "reference.jsonl", [reference[request.chunk_id].model_dump(mode="json")
+                                                  for request in requests if request.chunk_id in reference])
+    write_json(directory / "manifest.json", manifest)
+    journal.unlink()
+
+
+def commit_append(directory: Path, previous_manifest, manifest, cohort, reference):
+    """Journal the full target before replacing metadata; never rewrite results."""
+    write_json(directory / APPEND_TRANSACTION, {
+        "format_version": FORMAT_VERSION,
+        "previous_manifest_sha256": digest(previous_manifest),
+        "manifest": manifest, "cohort": cohort, "reference": reference,
+    })
+    recover_append(directory)
+
+
 def load_gold(directory: Path):
+    """Return full cohort, usable references, fingerprint and ordered skip records."""
     manifest, requests, rows, _ = load_run(directory)
     if manifest["kind"] != "gold" or len(manifest["configuration"]["models"]) != 1:
         raise ValueError("--gold must identify a gold-generation directory")
@@ -178,8 +252,15 @@ def load_gold(directory: Path):
         raise ValueError("gold prompt/schema differs from this benchmark version")
     if settings["provider"] != "openrouter" or settings.get("reasoning_effort") in {None, "none"}:
         raise ValueError("gold must use OpenRouter with reasoning enabled")
-    if len(rows) != len(requests) or any(row.status != "succeeded" for row in rows.values()):
-        raise ValueError("gold is incomplete or failed; resume gold generation before evaluating candidates")
-    reference = {row.chunk_id: row.result for row in rows.values()}
+    reference = {row.chunk_id: row.result for row in rows.values() if row.status == "succeeded"}
+    by_id = {row.chunk_id: row for row in rows.values()}
+    skipped_gold = []
+    for request in requests:
+        row = by_id.get(request.chunk_id)
+        if row is None:
+            skipped_gold.append({"chunk_id": request.chunk_id, "reason": "gold_missing", "error_type": None})
+        elif row.status == "failed":
+            skipped_gold.append({"chunk_id": request.chunk_id, "reason": "gold_failed",
+                                 "error_type": str(row.error.get("type") or "UnknownError")})
     fingerprint = digest({"manifest": manifest, "rows": [row.model_dump(mode="json") for row in rows.values()]})
-    return requests, reference, fingerprint
+    return requests, reference, fingerprint, skipped_gold

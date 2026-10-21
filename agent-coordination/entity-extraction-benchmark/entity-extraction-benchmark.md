@@ -7,9 +7,9 @@ handoff for the standalone benchmark. RAGAS evaluation keeps its reference in
 ## Purpose and current state
 
 Implementation is complete for cohort selection, structured gold generation,
-resumable artifacts, candidate comparison, deterministic scoring and offline
-summaries. Generating the real 150-paragraph gold set remains an operational
-step: choose an OpenRouter reasoning model and run the gold command below.
+resumable artifacts, append/range extension, candidate comparison, deterministic
+scoring and offline summaries. Generating the real 150-paragraph gold set remains
+an operational step: choose an OpenRouter reasoning model and run the gold command below.
 Model-generated gold is authoritative for this experiment; it has no human
 annotation/review stage.
 
@@ -118,6 +118,69 @@ and replace that paragraph's latest outcome; earlier raw failure text is not an
 attempt-history log. Model/schema/prompt/source/budget/endpoint/timeout/retry
 settings must match the saved run. Changing them requires a new output directory.
 
+The paragraph count must also match `configuration.paragraphs` in the saved
+`manifest.json`. For example, retrying the 12 failures in the existing
+`gold-run-150` run requires `--paragraphs 150`, even if you now want 180:
+
+```sh
+uv run --locked graphrag-extraction-benchmark gold --model openai/gpt-6.1-sol --reasoning-effort medium --paragraphs 150 --max-tokens 32768 --output runs/entity-extraction/gold-run-150 --resume --retry-failed
+```
+
+Requesting 180 with ordinary resume stops before provider calls. Use the append
+selectors below to extend the saved cohort. A retried extraction can still fail
+validation; check saved attempt counts to distinguish a retry from skipped work.
+
+### 3a. Append more paragraphs to an existing run
+
+To extend a saved 150-paragraph gold run to 180, repeat its exact model and
+generation settings and choose either of these equivalent selectors:
+
+```sh
+uv run --locked graphrag-extraction-benchmark gold --model openai/gpt-6.1-sol --reasoning-effort medium --max-tokens 32768 --output runs/entity-extraction/gold-run-150 --additional-paragraphs 30
+uv run --locked graphrag-extraction-benchmark gold --model openai/gpt-6.1-sol --reasoning-effort medium --max-tokens 32768 --output runs/entity-extraction/gold-run-150 --start-paragraph 151 --end-paragraph 180
+```
+
+Run **one** command. Counts mean paragraphs, and range endpoints are inclusive,
+1-based positions in the flattened source order, not dataset records, source
+lines or per-record `idx` values. A range must start immediately after the saved
+cohort. Overlaps, gaps, reversed ranges and insufficient input are rejected.
+Append selectors cannot be combined with `--paragraphs`.
+
+Append requires an existing run with an attempt saved for every current
+paragraph/model. Finish pending work with ordinary resume first. Saved failures
+are allowed and stay unchanged by default. To retry them while adding new
+paragraphs, also pass `--resume --retry-failed`. Successful rows, attempt counts,
+raw responses and scores are preserved. Only newly added paragraphs generate
+calls unless retries are explicitly requested. The output directory name does
+not change; `gold-run-150` can contain 180 paragraphs after append.
+
+The original source file (including checksum and saved prefix), models, prompt,
+schema, budgets, endpoints and retry/timeout settings must match. Add `--dry-run`
+to validate compatibility and preview the old count, added count and inclusive
+range without provider calls or artifact writes.
+
+Extend the gold cohort before extending candidate comparisons. Candidate
+append uses the same selectors, takes inputs from saved gold, and validates
+that previously frozen labels are unchanged:
+
+```sh
+uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-run-150 --model ollama:qwen3:4b --ollama-think false --output runs/entity-extraction/local-candidate --additional-paragraphs 30
+```
+
+Use the settings and output path of your existing candidate run. Gold must
+cover the target range; a larger gold cohort is allowed. Every candidate model
+processes the same added paragraphs with usable gold, and the summary includes
+the full requested cohort and its skipped paragraphs. Append positions count
+all gold cohort paragraphs, including skips, rather than only comparable rows.
+
+If append is interrupted, resume the expanded cohort instead of adding another
+N. For gold, specify the new total; candidate resume reads its saved count:
+
+```sh
+uv run --locked graphrag-extraction-benchmark gold --model openai/gpt-6.1-sol --reasoning-effort medium --paragraphs 180 --max-tokens 32768 --output runs/entity-extraction/gold-run-150 --resume
+uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/gold-run-150 --model ollama:qwen3:4b --ollama-think false --output runs/entity-extraction/local-candidate --resume
+```
+
 ### 4. Compare an Ollama candidate
 
 Start Ollama and install your chosen model, for example:
@@ -156,9 +219,27 @@ uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/
 ```
 
 Each model receives the same paragraphs, title/text inputs and extraction
-instructions. The candidate command requires a complete successful gold run
-and never sees gold labels in its model requests. No original dataset access
-is required after gold generation; paragraph inputs come from the saved cohort.
+instructions. The candidate command uses successful validated gold labels and
+skips paragraphs whose gold extraction failed or has no saved attempt. Candidate
+models never see gold labels in their requests. No original dataset access is
+required after gold generation; paragraph inputs come from the saved cohort.
+
+Skipping is automatic. With 180 requested paragraphs and 130 failed gold
+extractions, each candidate receives only the remaining 50 paragraphs. The JSON
+summary includes `requested` (180), `comparable` (50), `skipped` (130), and
+`skipped_gold`, an ordered list of paragraph `chunk_id`, `reason` and `error_type`.
+Reasons are `gold_failed` with the saved exception type, or `gold_missing` with
+null error type when no gold attempt exists. Full error messages are not copied
+into skip records. Corrupt gold artifacts still fail validation.
+
+Each model reports `expected` as the comparable count and `compared` as the
+number of completed, scored candidate attempts, including candidate failures.
+Gold skips count as neither candidate failures nor pending work and contribute
+no TP/FP/FN. Scores therefore describe only the comparable subset. If all gold
+labels are unavailable, the run completes successfully with zero comparisons,
+zero metrics and no provider checks or generation calls. A zero metric in this
+case describes an empty scoring population. Dry-run previews include coverage
+counts and skipped IDs without calls or artifact writes.
 
 Duplicate provider/model entries are rejected. Candidate reasoning settings
 apply to all candidates of the matching provider in this run. Use separate
@@ -172,6 +253,11 @@ uv run --locked graphrag-extraction-benchmark run --gold runs/entity-extraction/
 
 Resume a candidate run using the same arguments plus `--resume`, and optionally
 `--retry-failed`, just as for gold generation.
+The gold fingerprint and skip set are frozen with the candidate run. Resume
+rejects a changed gold snapshot; append preserves existing labels and skip
+records and applies eligibility to the new source positions. To include labels
+repaired for previously skipped paragraphs, start a new candidate output
+directory. Candidate retries repeat candidate failures, not gold skips.
 
 ### 7. Inspect or regenerate scores offline
 
@@ -180,7 +266,8 @@ uv run --locked graphrag-extraction-benchmark report --input runs/entity-extract
 uv run --locked graphrag-extraction-benchmark report --input runs/entity-extraction/gold-150
 ```
 
-`report` validates saved rows and regenerates only `summary.json`. It checks
+`report` validates saved rows and regenerates `summary.json`. It also completes
+an interrupted append metadata commit when needed. It checks
 stored per-paragraph scores against deterministic recomputation. It needs no
 dataset, original gold directory, credentials, models, or graph. A partial run
 is reportable: pending paragraphs are shown explicitly and are not scored yet.
@@ -195,13 +282,16 @@ from the answer pipeline or RAGAS model settings.
 | --- | --- | --- | --- |
 | `--dataset-path` | `select`, `gold` | Path; MuSiQue dev file above | Local input JSONL. |
 | `--paragraphs` | `select`, `gold` | Positive integer; `150` | Exact paragraph prefix size; insufficient input fails. |
+| `--additional-paragraphs` | `gold`, `run` | Positive integer; omitted | Append the next N paragraphs to an existing fully attempted cohort; excludes range selectors and `--paragraphs`. |
+| `--start-paragraph` | `gold`, `run` | Positive integer; omitted | First new 1-based paragraph position; must be saved count + 1 and requires `--end-paragraph`. |
+| `--end-paragraph` | `gold`, `run` | Positive integer; omitted | Inclusive last new paragraph position; must be >= start. |
 | `--model` | `gold` | Required string | OpenRouter model ID without a provider prefix. |
 | `--model` | `run` | Required repeatable string | `openrouter:MODEL_ID` or `ollama:MODEL_TAG`. |
 | `--reasoning-effort` | `gold` | Required choice | `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; must be supported by the selected model. |
 | `--reasoning-effort` | `run` | Optional choice; omitted | OpenRouter candidates: the choices above plus `none`; omitted uses model defaults. Unsupported control is rejected. |
 | `--ollama-think` | `run` | String; `default` | `default` omits the field; `true`/`false` send booleans; other strings such as `high` are passed to Ollama for model-specific validation. |
-| `--gold` | `run` | Required directory | Complete gold run containing manifest, cohort and successful gold rows. |
-| `--output` | `gold`, `run` | Required directory | New/empty output or an existing matching run with `--resume`. |
+| `--gold` | `run` | Required directory | Gold run containing manifest and cohort; failed/missing labels are skipped and reported. |
+| `--output` | `gold`, `run` | Required directory | New/empty output or an existing matching run with `--resume` or append selectors. |
 | `--max-tokens` | `gold`, `run` | Positive integer; `16384` | Output budget; maps to OpenRouter `max_tokens` or Ollama `options.num_predict`. |
 | `--timeout` | `gold`, `run` | Positive finite seconds; `180` | Per-HTTP-request timeout, not a whole-run deadline. |
 | `--retries` | `gold`, `run` | Nonnegative integer; `2` | Additional transient HTTP/transport retries. |
@@ -264,6 +354,16 @@ local provenance. Pass only `contracts.model_input(request)` to a provider.
 and returns a fully validated shared `ExtractionResult`, or raises a validation
 error. These utilities make no service calls themselves.
 
+`runner.run_extraction(..., append_start=S)` takes the complete target prefix,
+validates that S is immediately after the saved cohort, and extends it while
+reusing saved rows. Candidate calls also supply the complete target reference
+and current gold fingerprint. `dry_run=True` performs local validation and
+returns a prospective summary without creating files or clients.
+For partial-gold candidates, pass `reference` containing only successful labels
+and `skipped_gold` containing the ordered skip records. Every cohort paragraph
+must have exactly one label or skip record. `artifacts.load_gold(path)` returns
+`(requests, reference, fingerprint, skipped_gold)` with the full source cohort.
+
 ## Artifacts and recovery
 
 All run artifacts live under the requested output directory. Examples under
@@ -271,13 +371,14 @@ All run artifacts live under the requested output directory. Examples under
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format version, run ID/time, frozen public model settings, full prompt/schema, scoring version, cohort checksum and gold/reference fingerprints where applicable. |
+| `manifest.json` | Format version, run ID/time, frozen public model settings, full prompt/schema, scoring version, cohort checksum and gold/reference fingerprints where applicable; candidate configuration also freezes nonempty `skipped_gold` records. |
 | `cohort.jsonl` | One label-free `ExtractionRequest` per paragraph, including title/body, stable IDs and source provenance/checksum. |
 | `gold.jsonl` | Gold runs: latest saved attempt per paragraph, including validated extraction or error and raw returned content. |
 | `predictions.jsonl` | Candidate runs: latest attempt per model/paragraph, with extraction/error and deterministic scores plus missing/unexpected sets. |
-| `reference.jsonl` | Candidate runs: frozen complete gold extractions in cohort order; permits independent offline reporting. |
+| `reference.jsonl` | Candidate runs: frozen successful gold extractions in cohort order, excluding skipped paragraphs; permits independent offline reporting. |
 | `preflight.json` | Last invocation's model availability/capability checks for models needing calls. |
-| `summary.json` | Per-model expected/attempted/success/failed/pending counts and candidate entity/relation micro metrics. |
+| `summary.json` | Per-model expected/attempted/success/failed/pending counts; candidate coverage, skipped IDs/failure types, per-model compared counts and entity/relation micro metrics. |
+| `.append-transaction.json` | Temporary full target metadata snapshot used to recover an interrupted append commit; automatically removed after recovery. |
 
 Saved attempts also include model specification, chunk ID, attempt number,
 timestamp, elapsed time, provider response/model/usage metadata when returned,
@@ -290,6 +391,14 @@ inconsistent saved rows fail validation. A crash between those two writes is
 recoverable by resume/report, which derives the summary from the saved rows.
 Source/prompt/schema/configuration/gold changes cannot be silently mixed with
 existing results. Concurrent writers are rejected by `.benchmark.lock`.
+
+Append journals the target cohort, manifest and candidate reference before
+replacing those files, keeping the run ID and creation time. Results remain
+intact. If metadata replacement is interrupted, readers validate the journal's
+target snapshot; resume or report finishes the replacements under the run lock.
+Dry-run reads that snapshot without changing files. Keep the transaction file
+until recovery completes. Existing format-v1 runs can be extended directly;
+ordinary runs require no migration.
 
 On a normal keyboard interruption, the lock is released and completed rows are
 retained. If a process is forcibly killed, confirm it has stopped before
@@ -324,7 +433,8 @@ Scoring version: `normalized-exact-v1`.
    then calculate precision/recall/F1. Paragraphs remain separate: matches cannot
    cross paragraph boundaries. A failed candidate predicts empty sets and thus
    contributes every gold item as a false negative. Pending work is unscored and
-   the summary marks the run incomplete.
+   the summary marks the run incomplete. Paragraphs without usable gold are
+   skipped for every candidate and excluded from scores and pending counts.
 
 Free entity/relation vocabularies can produce semantic equivalences that exact
 matching marks different (for example, `LOCATED_IN` versus `IS_IN`). This is a
@@ -361,13 +471,20 @@ Run the full unit suite, including existing answer and RAGAS provider tests:
 uv run --locked python -m pytest tests/unit -q
 ```
 
-Current automated evidence: **58 benchmark tests passed; 404 full unit tests
-passed**. Coverage includes real HTTP payloads via mocked transports for both
+Original implementation evidence: **58 benchmark tests passed; 404 full unit
+tests passed**. Coverage includes real HTTP payloads via mocked transports for both
 providers, advertised reasoning support, truncation, retry bounds, label
 isolation, interruption/resume skipping, explicit retries, artifact corruption,
 file locks, atomic replacement, type/direction/duplicate matching, failed
 candidate denominators, multiple candidates and offline reporting without the
 source dataset or original gold directory.
+
+Current focused benchmark suite: **89 tests passed**. Append/range coverage
+additionally exercises both 150-to-180 selectors, source
+and configuration rejection, saved failures and explicit retries, candidate
+reference preservation and cumulative scoring, larger-gold prefixes, interrupted
+generation, and recovery at each metadata replacement boundary. All generation
+in these unit tests uses mocked providers.
 
 Additional completion checks passed: locked project installation and the actual
 console entry point, 150-paragraph console selection, gold dry-run without
@@ -416,8 +533,8 @@ request, usage metadata and validation error at
 `runs/entity-extraction/live-smoke/ollama.json` (ignored by Git). In a benchmark
 candidate run, the same invalid output is saved as a failed extraction and
 contributes empty predictions to scoring; this path is covered by the unit tests.
-Gold generation would retain it as a failure and refuse candidate evaluation
-until the gold set was complete and valid.
+Gold generation retains it as a failure. Candidate evaluation now skips such
+failed gold paragraphs and reports their IDs and failure types.
 
 The live helper accepts `BENCHMARK_LIVE_EVIDENCE_DIR` to change its diagnostic
 output directory. It saves `<provider>.json`; a later smoke run replaces that
