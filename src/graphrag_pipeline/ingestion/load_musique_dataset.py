@@ -334,7 +334,7 @@ async def run_requests(
 
         progress = tqdm(
             total=len(requests),
-            desc="Loading MuSiQue chunks",
+            desc="Ingesting",
             unit="chunk",
             disable=not show_progress,
         )
@@ -343,15 +343,16 @@ async def run_requests(
             if not show_progress:
                 return
             postfix: dict[str, Any] = {
-                "records": f"{records_loaded}/{total_records}",
-                "free_hits": skipped_count,
-                "failed": len(failed),
+                "recs": f"{records_loaded}/{total_records}",
+                "free": skipped_count,
             }
             gw = _fetch_gateway_telemetry(gateway_base_url)
             if gw and "spent_usd" in gw:
                 spent = gw["spent_usd"]
                 budget = gw.get("budget_usd", 5.0)
-                postfix["spend"] = f"${spent:.4f}/${budget:.2f}"
+                postfix["spend"] = f"${spent:.2f}/${budget:.2f}"
+            if failed:
+                postfix["err"] = len(failed)
             progress.set_postfix(postfix)
 
         try:
@@ -601,16 +602,25 @@ def main() -> None:
     parser.set_defaults(show_progress=True)
     args = parser.parse_args()
 
-    summary = asyncio.run(
-        load_dataset(
-            dataset_path=args.dataset_path,
-            start_record=args.start_record,
-            max_records=args.records,
-            source_split=args.source_split,
-            dry_run=args.dry_run,
-            show_progress=args.show_progress,
+    try:
+        summary = asyncio.run(
+            load_dataset(
+                dataset_path=args.dataset_path,
+                start_record=args.start_record,
+                max_records=args.records,
+                source_split=args.source_split,
+                dry_run=args.dry_run,
+                show_progress=args.show_progress,
+            )
         )
-    )
+    except KeyboardInterrupt:
+        print("\n\n" + "=" * 70)
+        print("                 [Ingestion Paused by User (Ctrl+C)]")
+        print("=" * 70)
+        print("  All paragraphs processed so far are safely committed in Neo4j.")
+        print("  You can safely resume anytime by running the exact same command.")
+        print("=" * 70 + "\n")
+        raise SystemExit(130)
     if not args.dry_run:
         gw_info = _fetch_gateway_telemetry(getattr(model_settings_from_env(), "base_url", None))
         spend_str = (

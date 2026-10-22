@@ -24,6 +24,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import time
 import urllib.error
@@ -166,11 +167,15 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         if not self.verbose:
             return
         pct = (self.spent_usd / self.budget_usd * 100) if self.budget_usd > 0 else 0.0
-        sys.stdout.write(
-            f"\r\033[K[Gateway] Mode: {self.server_mode.upper()} | "
-            f"Spend: ${self.spent_usd:.4f}/${self.budget_usd:.2f} ({pct:.1f}%) | "
-            f"Paid Calls: {self.new_calls_count} | Free Hits: {self.cache_hits_count} | {action}"
+        cols = shutil.get_terminal_size((80, 24)).columns
+        line = (
+            f"[GW] {self.server_mode.upper()} | "
+            f"${self.spent_usd:.4f}/${self.budget_usd:.2f} ({pct:.1f}%) | "
+            f"Paid: {self.new_calls_count} | Free: {self.cache_hits_count} | {action}"
         )
+        if len(line) >= cols:
+            line = line[: max(10, cols - 1)]
+        sys.stdout.write(f"\r\033[K{line}")
         sys.stdout.flush()
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
