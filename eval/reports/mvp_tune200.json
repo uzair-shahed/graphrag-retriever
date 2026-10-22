@@ -5,20 +5,25 @@
     {
       "condition": "bm25",
       "num_questions": 200,
-      "answer_f1": 0.116,
+      "answer_f1": 0.329,
       "answer_f1_ci": [
-        0.116,
-        0.116
+        0.275,
+        0.387
       ],
-      "answer_em": 0.0,
+      "answer_em": 0.245,
       "answer_em_ci": [
-        0.0,
-        0.0
+        0.19,
+        0.305
       ],
-      "support_f1": 0.379,
+      "answer_containment": 0.25,
+      "answer_containment_ci": [
+        0.195,
+        0.31
+      ],
+      "support_f1": 0.329,
       "support_f1_ci": [
-        0.379,
-        0.379
+        0.285,
+        0.373
       ],
       "r_at_2": 0.335,
       "r_at_2_ci": [
@@ -35,119 +40,134 @@
         0.321,
         0.43
       ],
-      "mean_latency_seconds": 1.384,
-      "mean_cost_usd": 0.001,
+      "mean_latency_seconds": 1.875,
+      "mean_cost_usd": 0.00018,
       "predictions_path": "runs/mvp_openrouter_tune200/predictions_bm25.jsonl"
     },
     {
       "condition": "vector",
       "num_questions": 200,
-      "answer_f1": 0.151,
+      "answer_f1": 0.037,
       "answer_f1_ci": [
-        0.151,
-        0.151
+        0.017,
+        0.062
       ],
-      "answer_em": 0.0,
+      "answer_em": 0.03,
       "answer_em_ci": [
-        0.0,
-        0.0
+        0.01,
+        0.055
       ],
-      "support_f1": 0.534,
+      "answer_containment": 0.03,
+      "answer_containment_ci": [
+        0.01,
+        0.055
+      ],
+      "support_f1": 0.04,
       "support_f1_ci": [
-        0.534,
-        0.534
+        0.02,
+        0.065
       ],
-      "r_at_2": 0.457,
+      "r_at_2": 0.04,
       "r_at_2_ci": [
-        0.417,
-        0.497
+        0.02,
+        0.065
       ],
-      "r_at_5": 0.698,
+      "r_at_5": 0.055,
       "r_at_5_ci": [
-        0.662,
-        0.735
+        0.028,
+        0.087
       ],
-      "later_hop_r_at_5": 0.652,
+      "later_hop_r_at_5": 0.06,
       "later_hop_r_at_5_ci": [
-        0.603,
-        0.711
+        0.03,
+        0.095
       ],
-      "mean_latency_seconds": 2.202,
-      "mean_cost_usd": 0.001,
+      "mean_latency_seconds": 0.319,
+      "mean_cost_usd": 2e-05,
       "predictions_path": "runs/mvp_openrouter_tune200/predictions_vector.jsonl"
     },
     {
       "condition": "walk_off",
       "num_questions": 200,
-      "answer_f1": 0.151,
+      "answer_f1": 0.037,
       "answer_f1_ci": [
-        0.151,
-        0.151
+        0.017,
+        0.062
       ],
-      "answer_em": 0.0,
+      "answer_em": 0.03,
       "answer_em_ci": [
-        0.0,
-        0.0
+        0.01,
+        0.055
       ],
-      "support_f1": 0.534,
+      "answer_containment": 0.03,
+      "answer_containment_ci": [
+        0.01,
+        0.055
+      ],
+      "support_f1": 0.04,
       "support_f1_ci": [
-        0.534,
-        0.534
+        0.02,
+        0.065
       ],
-      "r_at_2": 0.457,
+      "r_at_2": 0.04,
       "r_at_2_ci": [
-        0.417,
-        0.497
+        0.02,
+        0.065
       ],
-      "r_at_5": 0.698,
+      "r_at_5": 0.055,
       "r_at_5_ci": [
-        0.662,
-        0.735
+        0.028,
+        0.087
       ],
-      "later_hop_r_at_5": 0.652,
+      "later_hop_r_at_5": 0.06,
       "later_hop_r_at_5_ci": [
-        0.603,
-        0.711
+        0.03,
+        0.095
       ],
-      "mean_latency_seconds": 0.004,
-      "mean_cost_usd": 0.001,
+      "mean_latency_seconds": 0.012,
+      "mean_cost_usd": 0.0,
       "predictions_path": "runs/mvp_openrouter_tune200/predictions_walk_off.jsonl"
     },
     {
       "condition": "walk_exact",
       "num_questions": 200,
-      "answer_f1": 0.164,
+      "answer_f1": 0.041,
       "answer_f1_ci": [
-        0.164,
-        0.164
+        0.018,
+        0.071
       ],
-      "answer_em": 0.005,
+      "answer_em": 0.035,
       "answer_em_ci": [
-        0.005,
-        0.005
+        0.01,
+        0.065
       ],
-      "support_f1": 0.528,
+      "answer_containment": 0.035,
+      "answer_containment_ci": [
+        0.01,
+        0.065
+      ],
+      "support_f1": 0.04,
       "support_f1_ci": [
-        0.528,
-        0.528
+        0.019,
+        0.066
       ],
-      "r_at_2": 0.457,
+      "r_at_2": 0.04,
       "r_at_2_ci": [
-        0.417,
-        0.497
+        0.02,
+        0.065
       ],
-      "r_at_5": 0.726,
+      "r_at_5": 0.058,
       "r_at_5_ci": [
-        0.684,
-        0.767
+        0.03,
+        0.092
       ],
-      "later_hop_r_at_5": 0.694,
+      "later_hop_r_at_5": 0.06,
       "later_hop_r_at_5_ci": [
-        0.637,
-        0.749
+        0.03,
+        0.095
       ],
-      "mean_latency_seconds": 1.371,
-      "mean_cost_usd": 0.001,
+      "mean_latency_seconds": 0.043,
+      "mean_cost_usd": 0.0,
       "predictions_path": "runs/mvp_openrouter_tune200/predictions_walk_exact.jsonl"
     }
   ]
