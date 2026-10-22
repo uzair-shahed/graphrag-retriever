@@ -60,3 +60,4 @@ def test_load_dataset_dry_run_reports_collect_and_elapsed_time(tmp_path: Path) -
     assert summary.elapsed_seconds >= summary.collect_seconds
     assert summary.run_seconds == 0.0
     assert "elapsed" in summary.to_dict()
+    assert summary.elapsed == summary.to_dict()["elapsed"]

@@ -62,6 +62,17 @@ if TYPE_CHECKING:
 DEFAULT_DATASET_PATH = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
 
 
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds as a compact, human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.2f}s"
+    minutes, remainder_seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{int(minutes)}m {remainder_seconds:.1f}s"
+    hours, remainder_minutes = divmod(minutes, 60)
+    return f"{int(hours)}h {int(remainder_minutes)}m {remainder_seconds:.1f}s"
+
+
 @dataclass
 class LoadSummary:
     """Outcome of one batch load run."""
@@ -82,6 +93,11 @@ class LoadSummary:
     run_seconds: float = 0.0
     elapsed_seconds: float = 0.0
 
+    @property
+    def elapsed(self) -> str:
+        """Format the elapsed time into a human-readable duration string."""
+        return format_duration(self.elapsed_seconds)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "dataset": self.dataset,
@@ -100,7 +116,7 @@ class LoadSummary:
             "collect_seconds": round(self.collect_seconds, 3),
             "run_seconds": round(self.run_seconds, 3),
             "elapsed_seconds": round(self.elapsed_seconds, 3),
-            "elapsed": format_duration(self.elapsed_seconds),
+            "elapsed": self.elapsed,
         }
 
 
@@ -124,6 +140,11 @@ class PreloadSummary:
         """Return whether every selected record was loaded successfully."""
         return not self.dead_lettered_records and not self.chunks_failed
 
+    @property
+    def elapsed(self) -> str:
+        """Format the elapsed time into a human-readable duration string."""
+        return format_duration(self.elapsed_seconds)
+
     def to_dict(self) -> dict[str, Any]:
         """Return an audit-friendly representation of the preload outcome."""
         return {
@@ -137,19 +158,8 @@ class PreloadSummary:
             "collect_seconds": round(self.collect_seconds, 3),
             "run_seconds": round(self.run_seconds, 3),
             "elapsed_seconds": round(self.elapsed_seconds, 3),
-            "elapsed": format_duration(self.elapsed_seconds),
+            "elapsed": self.elapsed,
         }
-
-
-def format_duration(seconds: float) -> str:
-    """Format a duration in seconds as a compact, human-readable string."""
-    if seconds < 60:
-        return f"{seconds:.2f}s"
-    minutes, remainder_seconds = divmod(seconds, 60)
-    if minutes < 60:
-        return f"{int(minutes)}m {remainder_seconds:.1f}s"
-    hours, remainder_minutes = divmod(minutes, 60)
-    return f"{int(hours)}h {int(remainder_minutes)}m {remainder_seconds:.1f}s"
 
 
 def measure_duration_seconds(start: float) -> float:
