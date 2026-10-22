@@ -278,6 +278,25 @@ def collect_selected_requests(
     return requests, dead_letters, len(selected_requests)
 
 
+def _fetch_gateway_telemetry(base_url: str | None = None) -> dict[str, Any]:
+    """Fetch live spend and call stats from the local model gateway if reachable."""
+    if not base_url:
+        return {}
+    try:
+        import urllib.request
+        root = base_url.rstrip("/")
+        if root.endswith("/v1"):
+            root = root[:-3]
+        health_url = f"{root}/health"
+        req = urllib.request.Request(health_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=0.2) as resp:
+            if resp.status == 200:
+                return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
 async def run_requests(
     requests: list[ExtractionRequest],
     neo4j_settings: Neo4jSettings,
@@ -300,8 +319,10 @@ async def run_requests(
     failed: list[dict[str, Any]] = []
     total_records = len({request.record_id for request in requests})
     records_loaded = 0
+    skipped_count = 0
     current_record_id: str | None = None
     current_record_failed = False
+    gateway_base_url = getattr(openrouter_settings, "base_url", None)
 
     connection = Neo4jConnection(neo4j_settings)
     try:
@@ -317,6 +338,22 @@ async def run_requests(
             unit="chunk",
             disable=not show_progress,
         )
+
+        def _update_progress() -> None:
+            if not show_progress:
+                return
+            postfix: dict[str, Any] = {
+                "records": f"{records_loaded}/{total_records}",
+                "free_hits": skipped_count,
+                "failed": len(failed),
+            }
+            gw = _fetch_gateway_telemetry(gateway_base_url)
+            if gw and "spent_usd" in gw:
+                spent = gw["spent_usd"]
+                budget = gw.get("budget_usd", 5.0)
+                postfix["spend"] = f"${spent:.4f}/${budget:.2f}"
+            progress.set_postfix(postfix)
+
         try:
             for request in requests:
                 if request.record_id != current_record_id:
@@ -327,6 +364,7 @@ async def run_requests(
 
                 p_hash = request.paragraph_hash
                 if p_hash and p_hash in completed_hashes:
+                    skipped_count += 1
                     succeeded.append(
                         {
                             "chunk_id": request.chunk_id,
@@ -335,7 +373,7 @@ async def run_requests(
                         }
                     )
                     progress.update(1)
-                    progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
+                    _update_progress()
                     continue
 
                 if p_hash:
@@ -375,11 +413,11 @@ async def run_requests(
                 finally:
                     clear_pipeline_store(pipeline)
                 progress.update(1)
-                progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
+                _update_progress()
 
             if current_record_id is not None and not current_record_failed:
                 records_loaded += 1
-                progress.set_postfix(records_loaded=f"{records_loaded}/{total_records}", failed=len(failed))
+                _update_progress()
         finally:
             progress.close()
     finally:
@@ -573,6 +611,24 @@ def main() -> None:
             show_progress=args.show_progress,
         )
     )
+    if not args.dry_run:
+        gw_info = _fetch_gateway_telemetry(getattr(model_settings_from_env(), "base_url", None))
+        spend_str = (
+            f"${gw_info['spent_usd']:.4f} / ${gw_info.get('budget_usd', 5.0):.2f}"
+            if gw_info and "spent_usd" in gw_info
+            else "N/A"
+        )
+        print("\n" + "=" * 70)
+        print("                     MuSiQue Ingestion Summary")
+        print("=" * 70)
+        print(f"  Dataset Slice       : {summary.dataset}")
+        print(f"  Records (Questions) : {summary.records_succeeded} / {summary.records_planned} loaded")
+        print(f"  Total Chunks        : {summary.chunks_planned}")
+        print(f"  Chunks Succeeded    : {len(summary.chunks_succeeded)} ({summary.chunks_skipped} free cache hits)")
+        print(f"  Chunks Failed       : {len(summary.chunks_failed)}")
+        print(f"  Elapsed Time        : {summary.elapsed}")
+        print(f"  Total Gateway Spend : {spend_str}")
+        print("=" * 70 + "\n")
     print(json.dumps(summary.to_dict(), indent=2, sort_keys=True))
     if summary.chunks_failed or summary.dead_lettered_records:
         raise SystemExit(1)

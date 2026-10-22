@@ -142,6 +142,8 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
     spent_usd: float = 0.0
     max_new_calls: int | None = None
     new_calls_count: int = 0
+    cache_hits_count: int = 0
+    verbose: bool = False
     fake_unit_cost: float = 0.001
     request_history: list[dict[str, Any]] = []
 
@@ -154,9 +156,22 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         cls.spent_usd = 0.0
         cls.max_new_calls = None
         cls.new_calls_count = 0
+        cls.cache_hits_count = 0
+        cls.verbose = False
         cls.fake_unit_cost = 0.001
         cls.upstream_base_url = "https://openrouter.ai/api/v1"
         cls.request_history.clear()
+
+    def _refresh_status_line(self, action: str = "Active") -> None:
+        if not self.verbose:
+            return
+        pct = (self.spent_usd / self.budget_usd * 100) if self.budget_usd > 0 else 0.0
+        sys.stdout.write(
+            f"\r\033[K[Gateway] Mode: {self.server_mode.upper()} | "
+            f"Spend: ${self.spent_usd:.4f}/${self.budget_usd:.2f} ({pct:.1f}%) | "
+            f"Paid Calls: {self.new_calls_count} | Free Hits: {self.cache_hits_count} | {action}"
+        )
+        sys.stdout.flush()
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass  # Silence default HTTP server console logging
@@ -180,6 +195,7 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                     "budget_usd": self.budget_usd,
                     "max_new_calls": self.max_new_calls,
                     "new_calls_count": self.new_calls_count,
+                    "cache_hits_count": self.cache_hits_count,
                 },
             )
         elif self.path in ("/requests", "/v1/requests"):
@@ -269,6 +285,8 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
                     },
                 )
                 return
+            type(self).cache_hits_count += 1
+            self._refresh_status_line("Replay Cache")
             with open(cache_file, encoding="utf-8") as f:
                 cached = json.load(f)
             self._send_json(200, cached.get("response", {}))
@@ -283,6 +301,9 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
 
         if self.server_mode in ("record", "stub") and not is_cache_hit:
             if self.spent_usd >= self.budget_usd:
+                if self.verbose:
+                    sys.stdout.write(f"\n[Gateway] BUDGET CEILING REACHED (${self.budget_usd:.2f})!\n")
+                    sys.stdout.flush()
                 self._send_json(
                     402,
                     {
@@ -315,6 +336,8 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         # 2. RECORD MODE
         if self.server_mode == "record":
             if is_cache_hit:
+                type(self).cache_hits_count += 1
+                self._refresh_status_line("Free Hit")
                 with open(cache_file, encoding="utf-8") as f:
                     cached = json.load(f)
                 self._send_json(200, cached.get("response", {}))
@@ -354,6 +377,7 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
             call_cost = float(resp_json.get("usage", {}).get("cost", 0.0))
             type(self).spent_usd += call_cost
             type(self).new_calls_count += 1
+            self._refresh_status_line(f"Paid +${call_cost:.4f}")
 
             # Write cache
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -479,8 +503,10 @@ def run_gateway(
     max_new_calls: int | None = None,
     fake_unit_cost: float = 0.001,
     upstream_base_url: str = "https://openrouter.ai/api/v1",
+    verbose: bool = True,
 ) -> None:
     """Start the model gateway HTTP server."""
+    ModelGatewayHandler.verbose = verbose
     ModelGatewayHandler.server_mode = mode
     ModelGatewayHandler.cache_dir = Path(cache_dir)
     ModelGatewayHandler.budget_usd = budget_usd
@@ -488,10 +514,24 @@ def run_gateway(
     ModelGatewayHandler.fake_unit_cost = fake_unit_cost
     ModelGatewayHandler.upstream_base_url = upstream_base_url
 
+    if verbose:
+        print("=" * 70)
+        print(f"  Model Gateway Active on http://{host}:{port}/v1")
+        print(f"  Mode: {mode.upper()} | Budget: ${budget_usd:.2f} | Upstream: {upstream_base_url}")
+        print(f"  Live Health & Spend: http://{host}:{port}/health")
+        print("  Waiting for GraphRAG requests... (Press Ctrl+C to stop)")
+        print("=" * 70)
+        sys.stdout.flush()
+
     server = ThreadingHTTPServer((host, port), ModelGatewayHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        if verbose:
+            print(
+                f"\n[Gateway] Stopped. Total spend: ${ModelGatewayHandler.spent_usd:.4f}, "
+                f"Paid calls: {ModelGatewayHandler.new_calls_count}, Free hits: {ModelGatewayHandler.cache_hits_count}"
+            )
         server.server_close()
 
 
