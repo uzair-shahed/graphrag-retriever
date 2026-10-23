@@ -1,0 +1,205 @@
+{
+  "n_questions": 300,
+  "comparisons": [
+    {
+      "left": "walk_exact",
+      "right": "vector",
+      "metrics": [
+        {
+          "metric": "answer_f1",
+          "n": 300,
+          "mean": 0.032056,
+          "ci_low": 0.002,
+          "ci_high": 0.064,
+          "higher": 23,
+          "tie": 262,
+          "lower": 15,
+          "separates": true
+        },
+        {
+          "metric": "answer_em",
+          "n": 300,
+          "mean": 0.04,
+          "ci_low": 0.007,
+          "ci_high": 0.073,
+          "higher": 19,
+          "tie": 274,
+          "lower": 7,
+          "separates": true
+        },
+        {
+          "metric": "answer_containment",
+          "n": 300,
+          "mean": 0.036667,
+          "ci_low": 0.003,
+          "ci_high": 0.07,
+          "higher": 20,
+          "tie": 271,
+          "lower": 9,
+          "separates": true
+        },
+        {
+          "metric": "support_f1",
+          "n": 300,
+          "mean": 0.022185,
+          "ci_low": -0.001,
+          "ci_high": 0.047,
+          "higher": 37,
+          "tie": 239,
+          "lower": 24,
+          "separates": false
+        }
+      ]
+    },
+    {
+      "left": "walk_exact",
+      "right": "bm25",
+      "metrics": [
+        {
+          "metric": "answer_f1",
+          "n": 300,
+          "mean": 0.184286,
+          "ci_low": 0.132,
+          "ci_high": 0.239,
+          "higher": 93,
+          "tie": 176,
+          "lower": 31,
+          "separates": true
+        },
+        {
+          "metric": "answer_em",
+          "n": 300,
+          "mean": 0.186667,
+          "ci_low": 0.137,
+          "ci_high": 0.24,
+          "higher": 71,
+          "tie": 214,
+          "lower": 15,
+          "separates": true
+        },
+        {
+          "metric": "answer_containment",
+          "n": 300,
+          "mean": 0.196667,
+          "ci_low": 0.147,
+          "ci_high": 0.253,
+          "higher": 73,
+          "tie": 213,
+          "lower": 14,
+          "separates": true
+        },
+        {
+          "metric": "support_f1",
+          "n": 300,
+          "mean": 0.141868,
+          "ci_low": 0.104,
+          "ci_high": 0.186,
+          "higher": 107,
+          "tie": 159,
+          "lower": 34,
+          "separates": true
+        }
+      ]
+    },
+    {
+      "left": "vector",
+      "right": "bm25",
+      "metrics": [
+        {
+          "metric": "answer_f1",
+          "n": 300,
+          "mean": 0.15223,
+          "ci_low": 0.104,
+          "ci_high": 0.203,
+          "higher": 81,
+          "tie": 193,
+          "lower": 26,
+          "separates": true
+        },
+        {
+          "metric": "answer_em",
+          "n": 300,
+          "mean": 0.146667,
+          "ci_low": 0.1,
+          "ci_high": 0.2,
+          "higher": 59,
+          "tie": 226,
+          "lower": 15,
+          "separates": true
+        },
+        {
+          "metric": "answer_containment",
+          "n": 300,
+          "mean": 0.16,
+          "ci_low": 0.11,
+          "ci_high": 0.213,
+          "higher": 63,
+          "tie": 222,
+          "lower": 15,
+          "separates": true
+        },
+        {
+          "metric": "support_f1",
+          "n": 300,
+          "mean": 0.119683,
+          "ci_low": 0.082,
+          "ci_high": 0.158,
+          "higher": 100,
+          "tie": 166,
+          "lower": 34,
+          "separates": true
+        }
+      ]
+    },
+    {
+      "left": "walk_off",
+      "right": "vector",
+      "metrics": [
+        {
+          "metric": "answer_f1",
+          "n": 300,
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0,
+          "higher": 0,
+          "tie": 300,
+          "lower": 0,
+          "separates": false
+        },
+        {
+          "metric": "answer_em",
+          "n": 300,
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0,
+          "higher": 0,
+          "tie": 300,
+          "lower": 0,
+          "separates": false
+        },
+        {
+          "metric": "answer_containment",
+          "n": 300,
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0,
+          "higher": 0,
+          "tie": 300,
+          "lower": 0,
+          "separates": false
+        },
+        {
+          "metric": "support_f1",
+          "n": 300,
+          "mean": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0,
+          "higher": 0,
+          "tie": 300,
+          "lower": 0,
+          "separates": false
+        }
+      ]
+    }
+  ]
+}
