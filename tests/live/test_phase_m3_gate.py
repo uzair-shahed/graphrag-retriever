@@ -133,9 +133,8 @@ def test_gate_m3_idempotency_and_zero_spend_rerun(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("GRAPH_RAG_VECTOR_DIMENSIONS", "1536")
     monkeypatch.setenv("GRAPH_RAG_PROVIDER", "openrouter")
 
-    dataset_path = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
-    if not dataset_path.exists():
-        pytest.skip(f"MuSiQue dataset not found at {dataset_path}")
+    from tests.live.musique_ci import musique_inputs
+    dataset_path, _slice_path = musique_inputs()
 
     # First run on records 1..3 (approximately 60 paragraphs)
     summary1 = asyncio.run(

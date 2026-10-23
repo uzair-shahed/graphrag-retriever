@@ -1,0 +1,24 @@
+{
+  "name": "musique_ci",
+  "seed": 20261018,
+  "size": 3,
+  "tune_size": 3,
+  "test_size": 0,
+  "source_file": "tests/fixtures/musique_ci.jsonl",
+  "unique_paragraphs": 12,
+  "hop_distribution": {
+    "total": {
+      "2": 3
+    },
+    "tune": {
+      "2": 3
+    },
+    "test": {}
+  },
+  "tune_ids": [
+    "2hop__ci_1a_1b",
+    "2hop__ci_2a_2b",
+    "2hop__ci_3a_3b"
+  ],
+  "test_ids": []
+}

@@ -117,13 +117,8 @@ def test_phase_gate_m5_fixed_schema_ingestion_and_bridge_coverage(
     monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", "false")
     monkeypatch.setenv("OPENROUTER_REQUIRE_PARAMETERS", "true")
 
-    dataset_path = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
-    if not dataset_path.exists():
-        pytest.skip(f"MuSiQue dataset not found at {dataset_path}")
-
-    # Load slice record IDs
-    slice_path = Path("eval/slices/ans_dev_mvp_v1.json")
-    assert slice_path.exists(), "eval/slices/ans_dev_mvp_v1.json must exist"
+    from tests.live.musique_ci import musique_inputs
+    dataset_path, slice_path = musique_inputs()
     with slice_path.open("r", encoding="utf-8") as f:
         slice_data = json.load(f)
     target_ids = set(slice_data["tune_ids"][:10])
@@ -137,7 +132,7 @@ def test_phase_gate_m5_fixed_schema_ingestion_and_bridge_coverage(
                 if len(slice_records) == 10:
                     break
 
-    assert len(slice_records) == 10, f"Expected 10 slice records, found {len(slice_records)}"
+    assert len(slice_records) == len(target_ids), f"Expected {len(target_ids)} slice records, found {len(slice_records)}"
 
     # Run ingestion for first 10 records
     summary = asyncio.run(

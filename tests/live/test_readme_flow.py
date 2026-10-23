@@ -9,6 +9,7 @@ is deliberately removed.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import threading
 import time
@@ -150,11 +151,11 @@ def test_rerun_one_record_yields_distinct_paragraphs_in_retrieval(
     monkeypatch.setenv("GRAPH_RAG_VECTOR_DIMENSIONS", "1536")
     monkeypatch.setenv("GRAPH_RAG_PROVIDER", "openrouter")
 
-    dataset_path = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
-    if not dataset_path.exists():
-        pytest.skip(f"MuSiQue dataset not found at {dataset_path}")
-
-    # First run: ingest record 1 (20 paragraphs)
+    from tests.live.musique_ci import musique_inputs
+    dataset_path, _slice_path = musique_inputs()
+    with dataset_path.open(encoding="utf-8") as handle:
+        first = json.loads(next(line for line in handle if line.strip()))
+    paragraph_count = len(first["paragraphs"])
     summary1 = asyncio.run(
         load_dataset(
             dataset_path=dataset_path,
@@ -165,7 +166,7 @@ def test_rerun_one_record_yields_distinct_paragraphs_in_retrieval(
             show_progress=False,
         )
     )
-    assert len(summary1.chunks_succeeded) == 20 or summary1.chunks_skipped == 20
+    assert len(summary1.chunks_succeeded) == paragraph_count or summary1.chunks_skipped == paragraph_count
 
     # Second run: rerun record 1 -> must skip all 20 ($0 spend)
     summary2 = asyncio.run(
@@ -178,7 +179,7 @@ def test_rerun_one_record_yields_distinct_paragraphs_in_retrieval(
             show_progress=False,
         )
     )
-    assert summary2.chunks_skipped == 20
+    assert summary2.chunks_skipped == paragraph_count
 
     # Ensure vector index is online
     with Neo4jConnection(settings) as conn:

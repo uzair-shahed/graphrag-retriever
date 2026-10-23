@@ -108,13 +108,14 @@ def test_phase_gate_m6_mvp_retrieval_and_comparative_baselines(
     monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", "false")
     monkeypatch.setenv("OPENROUTER_REQUIRE_PARAMETERS", "true")
 
-    slice_path = Path("eval/slices/ans_dev_mvp_v1.json")
-    assert slice_path.exists(), "eval/slices/ans_dev_mvp_v1.json must exist"
+    from tests.live.musique_ci import musique_inputs
+    _dataset_path, slice_path = musique_inputs()
     with slice_path.open("r", encoding="utf-8") as f:
         slice_data = json.load(f)
 
     # Establish Question nodes and IN_CONTEXT links for evaluated questions
-    target_ids = set(slice_data["tune_ids"][:5])
+    question_limit = min(5, len(slice_data["tune_ids"]))
+    target_ids = set(slice_data["tune_ids"][:question_limit])
     source_file = Path(slice_data["source_file"])
     from graphrag_pipeline.ingestion.record_adapter import build_context_links_for_record
     from graphrag_pipeline.storage.question_context import link_questions_to_paragraphs
@@ -131,14 +132,14 @@ def test_phase_gate_m6_mvp_retrieval_and_comparative_baselines(
         q_records, _, _ = conn.connect().execute_query("MATCH (q:Question) RETURN q.id AS qid")
         db_qids = {r["qid"] for r in q_records}
 
-    assert len(db_qids) >= 5, "Neo4j has fewer than 5 ingested Question nodes"
+    assert len(db_qids) >= question_limit, f"Neo4j has fewer than {question_limit} ingested Question nodes"
 
     run_1_dir = tmp_path / "run_1"
     report_1, results_1 = run_mvp(
         slice_spec=slice_path,
         split="tune",
         conditions=["bm25", "vector", "walk_off", "walk_exact"],
-        limit=5,
+        limit=question_limit,
         output_dir=run_1_dir,
         stub=False,  # Routes through model gateway stub server
     )
@@ -150,11 +151,11 @@ def test_phase_gate_m6_mvp_retrieval_and_comparative_baselines(
 
     # 2. Verify all predictions have valid grounded citations and non-negative metrics
     for r in results_1:
-        assert r.num_questions == 5
+        assert r.num_questions == question_limit
         pred_file = Path(r.predictions_path)
         assert pred_file.exists()
         preds = [json.loads(line) for line in pred_file.read_text().strip().splitlines()]
-        assert len(preds) == 5
+        assert len(preds) == question_limit
         for p in preds:
             assert "id" in p
             assert "predicted_answer" in p
@@ -185,7 +186,7 @@ def test_phase_gate_m6_mvp_retrieval_and_comparative_baselines(
         slice_spec=slice_path,
         split="tune",
         conditions=["bm25", "vector", "walk_off", "walk_exact"],
-        limit=5,
+        limit=question_limit,
         output_dir=run_2_dir,
         stub=False,  # Replay mode
     )

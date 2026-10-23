@@ -67,16 +67,11 @@ def test_phase_gate_m4_strict_json_and_replay_idempotency(
     with urllib.request.urlopen(f"{base_url}/requests/clear") as resp:
         assert resp.status == 200
 
-    # Load 10 slice questions
-    slice_file = Path("eval/slices/ans_dev_mvp_v1.json")
-    assert slice_file.exists(), "eval/slices/ans_dev_mvp_v1.json must exist"
+    from tests.live.musique_ci import musique_inputs
+    dataset_file, slice_file = musique_inputs()
     with slice_file.open("r", encoding="utf-8") as f:
         slice_data = json.load(f)
     target_ids = set(slice_data["tune_ids"][:10])
-
-    dataset_file = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
-    if not dataset_file.exists():
-        pytest.skip("MuSiQue dataset file not downloaded locally.")
 
     records = []
     with dataset_file.open("r", encoding="utf-8") as f:
@@ -84,10 +79,10 @@ def test_phase_gate_m4_strict_json_and_replay_idempotency(
             record = json.loads(line)
             if record["id"] in target_ids:
                 records.append(record)
-                if len(records) == 10:
+                if len(records) == len(target_ids):
                     break
 
-    assert len(records) == 10, f"Expected 10 slice records, found {len(records)}"
+    assert len(records) == len(target_ids), f"Expected {len(target_ids)} slice records, found {len(records)}"
 
     # Build retrieval contexts using BM25
     contexts: list[tuple[QueryRequest, RetrievalResult]] = []
@@ -149,12 +144,12 @@ def test_phase_gate_m4_strict_json_and_replay_idempotency(
         assert len(res.citations) > 0
         run1_responses.append(res)
 
-    assert len(run1_responses) == 10
+    assert len(run1_responses) == len(records)
 
     # Gateway inspection: 10 calls, pinned provider, temperature 0, seed, no reasoning_effort
     with urllib.request.urlopen(f"{base_url}/requests") as resp:
         req_history = json.loads(resp.read().decode())["requests"]
-        assert len(req_history) == 10
+        assert len(req_history) == len(records)
         for item in req_history:
             body = item["body"]
             assert body["temperature"] == 0.0
@@ -167,8 +162,8 @@ def test_phase_gate_m4_strict_json_and_replay_idempotency(
     # Cost is logged
     with urllib.request.urlopen(f"{base_url}/health") as resp:
         health1 = json.loads(resp.read().decode())
-        assert abs(health1["spent_usd"] - 0.010) < 1e-6
-        assert health1["new_calls_count"] == 10
+        assert abs(health1["spent_usd"] - (len(records) * 0.001)) < 1e-6
+        assert health1["new_calls_count"] == len(records)
 
     # Run 2: Replay mode
     req_replay_cfg = urllib.request.Request(

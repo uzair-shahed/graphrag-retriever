@@ -42,9 +42,8 @@ def _get_live_connection():
 @pytest.mark.live
 def test_question_context_linking_and_no_leakage_on_real_data():
     """Verify linking 60 real MuSiQue questions to Documents with zero gold label leakage."""
-    dataset_path = Path("dataset/musique/data/data/musique_ans_v1.0_dev.jsonl")
-    if not dataset_path.exists():
-        pytest.skip("Dataset file not available")
+    from tests.live.musique_ci import musique_inputs
+    dataset_path, _slice_path = musique_inputs()
 
     # Read 60 questions
     with dataset_path.open("r", encoding="utf-8") as f:
@@ -80,7 +79,8 @@ def test_question_context_linking_and_no_leakage_on_real_data():
         links_created = link_questions_to_paragraphs(driver, all_links, batch_size=50)
 
         # Verify link count matches total candidate occurrences
-        assert links_created == len(all_links) == len(records) * 20
+        assert links_created == len(all_links)
+        paragraphs_per_question = len(records[0]["paragraphs"])
 
         # Verify Question node count
         with driver.session() as s:
@@ -88,15 +88,15 @@ def test_question_context_linking_and_no_leakage_on_real_data():
             d_count = s.run("MATCH (d:Document) RETURN count(d) AS c").single()["c"]
             r_count = s.run("MATCH ()-[r:IN_CONTEXT]->() RETURN count(r) AS c").single()["c"]
 
-        assert q_count == 60
+        assert q_count == len(records)
         assert d_count == len(unique_docs)
         assert r_count == len(all_links)
 
         # Verify each question has exactly 20 ordered candidate hashes
         first_q = records[0]["id"]
         candidates = get_question_candidate_hashes(driver, first_q)
-        assert len(candidates) == 20
-        assert [idx for idx, _ in candidates] == list(range(20))
+        assert len(candidates) == paragraphs_per_question
+        assert [idx for idx, _ in candidates] == list(range(paragraphs_per_question))
 
         # CRITICAL SAFETY CHECK: Zero gold labels in the graph
         verify_no_leakage_in_graph(driver)
