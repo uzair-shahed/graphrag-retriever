@@ -1,0 +1,174 @@
+{
+  "slice": "ans_dev_mvp_v1",
+  "split": "test",
+  "results": [
+    {
+      "condition": "bm25",
+      "num_questions": 300,
+      "answer_f1": 0.28,
+      "answer_f1_ci": [
+        0.234,
+        0.323
+      ],
+      "answer_em": 0.187,
+      "answer_em_ci": [
+        0.143,
+        0.23
+      ],
+      "answer_containment": 0.22,
+      "answer_containment_ci": [
+        0.173,
+        0.267
+      ],
+      "support_f1": 0.312,
+      "support_f1_ci": [
+        0.276,
+        0.347
+      ],
+      "r_at_2": 0.307,
+      "r_at_2_ci": [
+        0.278,
+        0.339
+      ],
+      "r_at_5": 0.474,
+      "r_at_5_ci": [
+        0.442,
+        0.509
+      ],
+      "later_hop_r_at_5": 0.371,
+      "later_hop_r_at_5_ci": [
+        0.324,
+        0.418
+      ],
+      "mean_latency_seconds": 1.047,
+      "mean_cost_usd": 0.00019,
+      "predictions_path": "runs/mvp_results/predictions_bm25.jsonl"
+    },
+    {
+      "condition": "vector",
+      "num_questions": 300,
+      "answer_f1": 0.432,
+      "answer_f1_ci": [
+        0.38,
+        0.478
+      ],
+      "answer_em": 0.333,
+      "answer_em_ci": [
+        0.283,
+        0.383
+      ],
+      "answer_containment": 0.38,
+      "answer_containment_ci": [
+        0.327,
+        0.43
+      ],
+      "support_f1": 0.431,
+      "support_f1_ci": [
+        0.395,
+        0.465
+      ],
+      "r_at_2": 0.466,
+      "r_at_2_ci": [
+        0.438,
+        0.498
+      ],
+      "r_at_5": 0.674,
+      "r_at_5_ci": [
+        0.642,
+        0.707
+      ],
+      "later_hop_r_at_5": 0.574,
+      "later_hop_r_at_5_ci": [
+        0.527,
+        0.623
+      ],
+      "mean_latency_seconds": 1.431,
+      "mean_cost_usd": 0.00019,
+      "predictions_path": "runs/mvp_results/predictions_vector.jsonl"
+    },
+    {
+      "condition": "walk_off",
+      "num_questions": 300,
+      "answer_f1": 0.432,
+      "answer_f1_ci": [
+        0.38,
+        0.478
+      ],
+      "answer_em": 0.333,
+      "answer_em_ci": [
+        0.283,
+        0.383
+      ],
+      "answer_containment": 0.38,
+      "answer_containment_ci": [
+        0.327,
+        0.43
+      ],
+      "support_f1": 0.431,
+      "support_f1_ci": [
+        0.395,
+        0.465
+      ],
+      "r_at_2": 0.466,
+      "r_at_2_ci": [
+        0.438,
+        0.498
+      ],
+      "r_at_5": 0.674,
+      "r_at_5_ci": [
+        0.642,
+        0.707
+      ],
+      "later_hop_r_at_5": 0.574,
+      "later_hop_r_at_5_ci": [
+        0.527,
+        0.623
+      ],
+      "mean_latency_seconds": 0.034,
+      "mean_cost_usd": 0.0,
+      "predictions_path": "runs/mvp_results/predictions_walk_off.jsonl"
+    },
+    {
+      "condition": "walk_exact",
+      "num_questions": 300,
+      "answer_f1": 0.464,
+      "answer_f1_ci": [
+        0.416,
+        0.509
+      ],
+      "answer_em": 0.373,
+      "answer_em_ci": [
+        0.323,
+        0.427
+      ],
+      "answer_containment": 0.417,
+      "answer_containment_ci": [
+        0.367,
+        0.467
+      ],
+      "support_f1": 0.454,
+      "support_f1_ci": [
+        0.42,
+        0.487
+      ],
+      "r_at_2": 0.466,
+      "r_at_2_ci": [
+        0.438,
+        0.498
+      ],
+      "r_at_5": 0.725,
+      "r_at_5_ci": [
+        0.691,
+        0.76
+      ],
+      "later_hop_r_at_5": 0.686,
+      "later_hop_r_at_5_ci": [
+        0.641,
+        0.731
+      ],
+      "mean_latency_seconds": 0.86,
+      "mean_cost_usd": 0.00014,
+      "predictions_path": "runs/mvp_results/predictions_walk_exact.jsonl"
+    }
+  ]
+}

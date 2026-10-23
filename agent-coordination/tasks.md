@@ -34,8 +34,8 @@ Still active:
 
 ## Neo4j AI Plugin Architecture Decision
 
-- [x] Use Neo4j's AI plugin as the default implementation for both GraphRAG and VectorRAG in the local project runtime.
-- [x] The retrieval layer is delegated to Neo4j AI plugin capabilities.
+- [ ] Use Neo4j's AI plugin as the default implementation for both GraphRAG and VectorRAG in the local project runtime. Open: MVP retrieval is hand-written Cypher in `src/graphrag_pipeline/retrieval.py`. Plugin-managed VectorRAG and GraphRAG retrieval are not the current path.
+- [ ] The retrieval layer is delegated to Neo4j AI plugin capabilities. Open: same as above. `SimpleKGPipeline` can still be the extraction engine; that does not make retrieval plugin-managed.
 - [x] Document Neo4j plugin version, configuration, feature flags, limitations, and validation checks before relying on plugin responses in evaluation.
 - [x] Treat the plugin-first `SimpleKGPipeline` as the active extraction engine for this project scope, with the archived hand-built extraction models retained only as compatibility/fallback references.
 
