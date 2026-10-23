@@ -183,11 +183,14 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, status_code: int, payload: dict[str, Any]) -> None:
         data = json.dumps(payload).encode("utf-8")
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path in ("/health", "/v1/models"):
@@ -499,6 +502,16 @@ class ModelGatewayHandler(BaseHTTPRequestHandler):
         self._send_json(200, resp_payload)
 
 
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that ignores BrokenPipeError when clients disconnect early."""
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        exc_type, _, _ = sys.exc_info()
+        if exc_type in (BrokenPipeError, ConnectionResetError):
+            return
+        super().handle_error(request, client_address)
+
+
 def run_gateway(
     host: str = "127.0.0.1",
     port: int = 18080,
@@ -528,7 +541,7 @@ def run_gateway(
         print("=" * 70)
         sys.stdout.flush()
 
-    server = ThreadingHTTPServer((host, port), ModelGatewayHandler)
+    server = QuietThreadingHTTPServer((host, port), ModelGatewayHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -574,6 +574,24 @@ def run_mvp(
             model_settings = OllamaSettings.from_env()
         else:
             model_settings = OpenRouterSettings.from_env()
+
+        from graphrag_pipeline.preflight import PreflightError, run_preflight_checks
+        try:
+            neo4j_settings = Neo4jSettings.from_env()
+            run_preflight_checks(neo4j_settings, model_settings, require_vector_index=False)
+        except PreflightError as e:
+            logger.error("Preflight check failed: %s", e)
+            print("\n" + "=" * 70)
+            print("                 [Preflight Check Failed]")
+            print("=" * 70)
+            print(f"  {e}")
+            if "unreachable" in str(e).lower() and "8080" in str(e):
+                print("\n  The Model Gateway is not running on port 8080.")
+                print("  Please start the gateway in another terminal:")
+                print("    uv run python tools/model_gateway.py --port 8080 --mode record --budget-usd 5.0")
+            print("=" * 70 + "\n")
+            raise SystemExit(1) from e
+
         llm = build_answer_llm(model_settings)
         embedder = _build_embedder(model_settings)
 
